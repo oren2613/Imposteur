@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-100 min-h-screen;
+  }
+}
+
+/* Transitions de page */
+.page-enter {
+  @apply opacity-0 translate-y-2;
+}
+.page-enter-active {
+  @apply opacity-100 translate-y-0 transition-all duration-300 ease-out;
+}
