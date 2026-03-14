@@ -56,30 +56,22 @@ export function OnlineLobbyScreen() {
             Joueurs ({members.length} / {config.playerCount})
           </p>
           <ul className="space-y-2">
-            {members.map((m) => {
-              const games = m.gamesPlayed ?? 0;
-              const wins = m.wins ?? 0;
-              const pct = games > 0 ? ((wins / games) * 100).toFixed(1) : '—';
-              return (
-                <li
-                  key={m.socketId}
-                  className="flex items-center justify-between gap-3 py-2 text-slate-800 dark:text-slate-100"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-medium shrink-0">
-                      {m.isHost ? '★' : '·'}
-                    </span>
-                    <span className="truncate">{m.name}</span>
-                    {m.isHost && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">(host)</span>
-                    )}
-                  </div>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
-                    {games} partie{games !== 1 ? 's' : ''}, {wins} victoire{wins !== 1 ? 's' : ''}, {pct}%
+            {members.map((m) => (
+              <li
+                key={m.socketId}
+                className="flex items-center justify-between gap-3 py-2 text-slate-800 dark:text-slate-100"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-medium shrink-0">
+                    {m.isHost ? '★' : '·'}
                   </span>
-                </li>
-              );
-            })}
+                  <span className="truncate">{m.name}</span>
+                  {m.isHost && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">(host)</span>
+                  )}
+                </div>
+              </li>
+            ))}
           </ul>
         </div>
 

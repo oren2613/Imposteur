@@ -3,6 +3,7 @@ import { Mic, MicOff } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
+import { OnlineStatsBar } from '../components/OnlineStatsBar';
 import { ViewMyWordModal } from '../components/ViewMyWordModal';
 
 const TICK_MS = 200;
@@ -60,6 +61,7 @@ export function OnlineDiscussionScreen() {
 
   return (
     <Layout title="Discussion" hideBack onBack={() => {}} backLabel="">
+      <OnlineStatsBar />
       <div className="flex flex-col gap-6">
         {error && (
           <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">

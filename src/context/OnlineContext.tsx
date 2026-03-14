@@ -92,6 +92,8 @@ interface OnlineContextValue {
   error: string | null;
   /** True pendant une tentative de reconnexion au chargement */
   isReconnecting: boolean;
+  /** Mes stats (parties jouées, victoires) — en partie uniquement */
+  myStats: { gamesPlayed: number; wins: number };
   /** Créer une room avec le pseudo et une config par défaut */
   createRoom: (playerName: string) => void;
   /** Rejoindre une room par code */
@@ -373,6 +375,18 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, [clearErrorTimeout]);
 
+  const myStats = useMemo(() => {
+    if (!gameState || !roomState || myPlayerId == null) return { gamesPlayed: 0, wins: 0 };
+    const myPlayer = gameState.players.find((p) => p.id === myPlayerId);
+    const myName = myPlayer?.name;
+    if (!myName) return { gamesPlayed: 0, wins: 0 };
+    const member = roomState.members.find((m) => m.name === myName);
+    return {
+      gamesPlayed: member?.gamesPlayed ?? 0,
+      wins: member?.wins ?? 0,
+    };
+  }, [gameState, roomState, myPlayerId]);
+
   const value = useMemo<OnlineContextValue>(
     () => ({
       roomState,
@@ -383,6 +397,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       isHost,
       error,
       isReconnecting,
+      myStats,
       createRoom,
       joinRoom,
       leaveRoom,
@@ -404,6 +419,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       isHost,
       error,
       isReconnecting,
+      myStats,
       createRoom,
       joinRoom,
       leaveRoom,

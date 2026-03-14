@@ -1,6 +1,7 @@
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
+import { OnlineStatsBar } from '../components/OnlineStatsBar';
 
 export function OnlineEliminatedRevealScreen() {
   const { gameState, error, continueAfterEliminated, clearError } = useOnline();
@@ -13,6 +14,7 @@ export function OnlineEliminatedRevealScreen() {
   if (!eliminated) {
     return (
       <Layout title="Révélation" hideBack onBack={() => {}} backLabel="">
+        <OnlineStatsBar />
         <p className="text-center text-slate-500 dark:text-slate-400">Chargement…</p>
       </Layout>
     );
@@ -20,6 +22,7 @@ export function OnlineEliminatedRevealScreen() {
 
   return (
     <Layout title="Révélation" hideBack onBack={() => {}} backLabel="">
+      <OnlineStatsBar />
       <div className="flex-1 flex flex-col justify-center gap-8">
         {error && (
           <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">

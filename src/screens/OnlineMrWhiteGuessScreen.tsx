@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
+import { OnlineStatsBar } from '../components/OnlineStatsBar';
 
 export function OnlineMrWhiteGuessScreen() {
   const { gameState, myPlayerId, error, submitMrWhiteGuess, clearError } = useOnline();
@@ -24,6 +25,7 @@ export function OnlineMrWhiteGuessScreen() {
 
   return (
     <Layout title="Dernière chance" hideBack onBack={() => {}} backLabel="">
+      <OnlineStatsBar />
       <div className="space-y-6">
         {error && (
           <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">

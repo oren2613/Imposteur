@@ -1,3 +1,4 @@
+import { Sun, Moon } from 'lucide-react';
 import { useGame } from './context/GameContext';
 import { useOnline } from './context/OnlineContext';
 import { useDarkMode } from './hooks/useDarkMode';
@@ -64,10 +65,10 @@ function DarkModeToggle() {
     <button
       type="button"
       onClick={() => setDark(!dark)}
-      className="fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+      className="fixed top-4 right-4 z-50 flex items-center justify-center gap-2 w-12 h-12 rounded-2xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 shadow-md hover:shadow-lg hover:bg-slate-100 dark:hover:bg-slate-700/80 transition-all duration-200 backdrop-blur-sm"
       aria-label={dark ? 'Mode clair' : 'Mode sombre'}
     >
-      {dark ? '☀️' : '🌙'}
+      {dark ? <Sun className="w-5 h-5" strokeWidth={2} /> : <Moon className="w-5 h-5" strokeWidth={2} />}
     </button>
   );
 }

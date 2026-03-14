@@ -1,6 +1,7 @@
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
+import { OnlineStatsBar } from '../components/OnlineStatsBar';
 import { RoomConfigForm } from '../components/RoomConfigForm';
 import type { OnlineGameConfig } from '../types/online';
 
@@ -30,6 +31,7 @@ export function OnlineEndScreen() {
 
   return (
     <Layout title="Fin de partie" onBack={() => leaveRoom()} backLabel="Quitter">
+      <OnlineStatsBar />
       <div className="space-y-6">
         <div className="bg-violet-100 dark:bg-violet-900/30 rounded-2xl p-6 text-center border border-violet-200 dark:border-violet-800">
           <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useOnline } from '../context/OnlineContext';
 import { Layout } from '../components/Layout';
+import { OnlineStatsBar } from '../components/OnlineStatsBar';
 
 const COUNTDOWN_SECONDS = 10;
 
@@ -22,6 +23,7 @@ export function OnlineRoleRevealScreen() {
 
   return (
     <Layout title="Ton mot" hideBack onBack={() => {}} backLabel="">
+      <OnlineStatsBar />
       <div className="flex-1 flex flex-col justify-center gap-8">
         {error && (
           <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">

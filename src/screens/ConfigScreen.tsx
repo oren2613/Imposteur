@@ -1,16 +1,25 @@
+import { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 12;
+const DUPLICATE_ERROR_DURATION_MS = 5000;
 
 export function ConfigScreen() {
   const { state, setConfig, setPhase, startNewGame } = useGame();
   const { config } = state;
+  const [showDuplicateError, setShowDuplicateError] = useState(false);
   const names = [...config.playerNames];
   while (names.length < config.playerCount) names.push('');
   while (names.length > config.playerCount) names.pop();
+
+  useEffect(() => {
+    if (!showDuplicateError) return;
+    const t = setTimeout(() => setShowDuplicateError(false), DUPLICATE_ERROR_DURATION_MS);
+    return () => clearTimeout(t);
+  }, [showDuplicateError]);
 
   const setPlayerCount = (n: number) => {
     const count = Math.max(MIN_PLAYERS, Math.min(MAX_PLAYERS, n));
@@ -38,6 +47,14 @@ export function ConfigScreen() {
     config.playerNames.slice(0, config.playerCount).map((n) => n.trim().toLowerCase())
   );
   const hasDuplicates = uniqueNames.size < config.playerCount;
+
+  const handleLaunch = () => {
+    if (hasDuplicates) {
+      setShowDuplicateError(true);
+      return;
+    }
+    startNewGame();
+  };
 
   const maxImpostors = Math.max(1, config.playerCount - (config.mrWhiteEnabled ? 2 : 1));
   const impostorCount = Math.min(config.impostorCount, maxImpostors);
@@ -159,7 +176,7 @@ export function ConfigScreen() {
           </button>
         </div>
 
-        {hasDuplicates && (
+        {showDuplicateError && (
           <p className="text-rose-600 dark:text-rose-400 text-sm">
             Les noms doivent être différents.
           </p>
@@ -168,7 +185,7 @@ export function ConfigScreen() {
         <Button
           fullWidth
           size="lg"
-          onClick={startNewGame}
+          onClick={handleLaunch}
           disabled={!canStart || hasDuplicates}
         >
           Lancer la partie
