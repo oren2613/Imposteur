@@ -1,9 +1,11 @@
 import { useGame } from '../context/GameContext';
+import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { StickmanParade } from '../components/StickmanParade';
 
 export function HomeScreen() {
   const { setPhase } = useGame();
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 max-w-md mx-auto relative pb-28">
@@ -28,6 +30,35 @@ export function HomeScreen() {
         >
           Jouer en ligne
         </Button>
+        {user ? (
+          <>
+            <Button
+              fullWidth
+              variant="ghost"
+              size="lg"
+              onClick={() => setPhase('profile')}
+            >
+              Mon profil
+            </Button>
+            <Button
+              fullWidth
+              variant="ghost"
+              size="lg"
+              onClick={() => setPhase('friends')}
+            >
+              Mes amis
+            </Button>
+          </>
+        ) : (
+          <Button
+            fullWidth
+            variant="ghost"
+            size="lg"
+            onClick={() => setPhase('login')}
+          >
+            Se connecter
+          </Button>
+        )}
         <Button
           fullWidth
           variant="ghost"

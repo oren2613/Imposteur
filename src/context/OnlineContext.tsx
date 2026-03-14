@@ -15,6 +15,7 @@ import {
 } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useGame } from './GameContext';
+import { getToken } from '../api/auth';
 import type {
   RoomLobbyState,
   RoomGameState,
@@ -116,6 +117,12 @@ interface OnlineContextValue {
   startNextRound: () => void;
   /** Effacer l'erreur affichée */
   clearError: () => void;
+  /** Invitation en cours (reçu via game_invite) */
+  pendingInvite: { roomId: string; hostName: string } | null;
+  /** Fermer l'invitation sans rejoindre */
+  clearPendingInvite: () => void;
+  /** Inviter un ami (par son userId) — host uniquement */
+  inviteFriend: (friendUserId: number) => void;
 }
 
 const OnlineContext = createContext<OnlineContextValue | null>(null);
@@ -130,6 +137,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [isHost, setIsHost] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [pendingInvite, setPendingInvite] = useState<{ roomId: string; hostName: string } | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const reconnectingRef = useRef(false);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -155,7 +163,17 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     const socket = io(SOCKET_URL, { autoConnect: true });
     socketRef.current = socket;
 
+    socket.on('connect', () => {
+      const token = getToken();
+      if (token) socket.emit('authenticate', { token });
+    });
+
+    socket.on('game_invite', (payload: { roomId: string; hostName: string }) => {
+      setPendingInvite({ roomId: payload.roomId, hostName: payload.hostName });
+    });
+
     socket.on('room_created', (payload: { roomId: string; roomState: RoomLobbyState }) => {
+      setPendingInvite(null);
       clearErrorTimeout();
       setError(null);
       const prev = getStoredSession();
@@ -173,6 +191,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     socket.on('room_joined', (payload: { roomId: string; roomState: RoomLobbyState; youAreHost: boolean }) => {
       clearErrorTimeout();
       setError(null);
+      setPendingInvite(null);
       setRoomId(payload.roomId);
       setRoomState(payload.roomState);
       setIsHost(payload.youAreHost);
@@ -375,6 +394,14 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, [clearErrorTimeout]);
 
+  const clearPendingInvite = useCallback(() => setPendingInvite(null), []);
+
+  const inviteFriend = useCallback((friendUserId: number) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('invite_to_room', { friendUserId });
+    }
+  }, []);
+
   const myStats = useMemo(() => {
     if (!gameState || !roomState || myPlayerId == null) return { gamesPlayed: 0, wins: 0 };
     const myPlayer = gameState.players.find((p) => p.id === myPlayerId);
@@ -409,6 +436,9 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       updateRoomConfig,
       startNextRound,
       clearError,
+      pendingInvite,
+      clearPendingInvite,
+      inviteFriend,
     }),
     [
       roomState,
@@ -420,6 +450,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       error,
       isReconnecting,
       myStats,
+      pendingInvite,
       createRoom,
       joinRoom,
       leaveRoom,
@@ -431,6 +462,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       updateRoomConfig,
       startNextRound,
       clearError,
+      clearPendingInvite,
+      inviteFriend,
     ]
   );
 

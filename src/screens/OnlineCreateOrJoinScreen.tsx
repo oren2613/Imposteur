@@ -1,14 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { useOnline } from '../context/OnlineContext';
+import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 
 export function OnlineCreateOrJoinScreen() {
   const { setPhase } = useGame();
   const { createRoom, joinRoom, error, clearError } = useOnline();
+  const { user } = useAuth();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
+
+  useEffect(() => {
+    if (user?.username && !playerName) setPlayerName(user.username);
+  }, [user?.username, playerName]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();

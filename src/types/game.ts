@@ -21,6 +21,10 @@ export interface Player {
 /** Phase actuelle de la partie (local) ou écran (online) */
 export type GamePhase =
   | 'home'
+  | 'login'
+  | 'signup'
+  | 'profile'
+  | 'friends'
   | 'rules'
   | 'history'
   | 'config'

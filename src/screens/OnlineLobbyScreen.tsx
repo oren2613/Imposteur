@@ -1,11 +1,22 @@
+import { useState, useEffect } from 'react';
 import { useOnline } from '../context/OnlineContext';
+import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { RoomConfigForm } from '../components/RoomConfigForm';
+import { fetchFriends, type Friend } from '../api/auth';
 import type { OnlineGameConfig } from '../types/online';
+import { UserPlus } from 'lucide-react';
 
 export function OnlineLobbyScreen() {
-  const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError } = useOnline();
+  const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError, inviteFriend } = useOnline();
+  const { user } = useAuth();
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [inviteSent, setInviteSent] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (user) fetchFriends().then(setFriends);
+  }, [user]);
 
   if (!roomState || !roomId) {
     return (
@@ -74,6 +85,36 @@ export function OnlineLobbyScreen() {
             ))}
           </ul>
         </div>
+
+        {isHost && user && friends.length > 0 && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
+              Inviter des amis
+            </p>
+            <ul className="space-y-2">
+              {friends.map((f) => (
+                <li
+                  key={f.id}
+                  className="flex items-center justify-between gap-3 py-2"
+                >
+                  <span className="text-slate-800 dark:text-slate-100 truncate">{f.username}</span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      inviteFriend(f.id);
+                      setInviteSent(f.id);
+                      setTimeout(() => setInviteSent(null), 3000);
+                    }}
+                  >
+                    <UserPlus className="w-4 h-4 mr-1" />
+                    {inviteSent === f.id ? 'Envoyé' : 'Inviter'}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {isHost && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">

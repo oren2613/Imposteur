@@ -350,6 +350,14 @@ export function getRoomIdBySocket(socketId: string): string | null {
   return socketToRoomId.get(socketId) ?? null;
 }
 
+/** Nom du host d'une room (pour les invitations) */
+export function getRoomHostName(roomId: string): string | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'lobby') return null;
+  const host = room.members.find((m) => m.socketId === room.hostSocketId);
+  return host?.name ?? null;
+}
+
 /**
  * Appelé à la déconnexion socket (refresh, fermeture onglet).
  * En partie : ne pas éliminer le joueur, juste libérer le socket pour reconnexion.

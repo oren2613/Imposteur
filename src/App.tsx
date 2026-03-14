@@ -2,7 +2,12 @@ import { Sun, Moon } from 'lucide-react';
 import { useGame } from './context/GameContext';
 import { useOnline } from './context/OnlineContext';
 import { useDarkMode } from './hooks/useDarkMode';
+import { GameInviteModal } from './components/GameInviteModal';
 import { HomeScreen } from './screens/HomeScreen';
+import { LoginScreen } from './screens/LoginScreen';
+import { SignupScreen } from './screens/SignupScreen';
+import { ProfileScreen } from './screens/ProfileScreen';
+import { FriendsScreen } from './screens/FriendsScreen';
 import { ConfigScreen } from './screens/ConfigScreen';
 import { RoleRevealScreen } from './screens/RoleRevealScreen';
 import { DiscussionScreen } from './screens/DiscussionScreen';
@@ -38,6 +43,10 @@ function AppContent() {
   }
 
   if (phase === 'home') return <HomeScreen />;
+  if (phase === 'login') return <LoginScreen />;
+  if (phase === 'signup') return <SignupScreen />;
+  if (phase === 'profile') return <ProfileScreen />;
+  if (phase === 'friends') return <FriendsScreen />;
   if (phase === 'rules') return <RulesScreen />;
   if (phase === 'history') return <HistoryScreen />;
   if (phase === 'config') return <ConfigScreen />;
@@ -77,6 +86,7 @@ export default function App() {
   return (
     <>
       <DarkModeToggle />
+      <GameInviteModal />
       <AppContent />
     </>
   );
