@@ -3,6 +3,7 @@ import { useGame } from './context/GameContext';
 import { useOnline } from './context/OnlineContext';
 import { useDarkMode } from './hooks/useDarkMode';
 import { GameInviteModal } from './components/GameInviteModal';
+import { FriendRequestModal } from './components/FriendRequestModal';
 import { HomeScreen } from './screens/HomeScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { SignupScreen } from './screens/SignupScreen';
@@ -87,6 +88,7 @@ export default function App() {
     <>
       <DarkModeToggle />
       <GameInviteModal />
+      <FriendRequestModal />
       <AppContent />
     </>
   );

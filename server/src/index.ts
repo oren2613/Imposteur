@@ -52,6 +52,10 @@ import {
   listFriends,
   addFriend,
   removeFriend,
+  createFriendRequest,
+  listPendingFriendRequests,
+  acceptFriendRequest,
+  refuseFriendRequest,
   type UserRow,
 } from './db.js';
 
@@ -139,15 +143,21 @@ app.get('/friends', authMiddleware, (req, res) => {
 app.post('/friends', authMiddleware, (req, res) => {
   const { username } = req.body ?? {};
   if (!username || typeof username !== 'string') {
-    res.status(400).json({ error: 'username requis' });
+    res.status(400).json({ error: 'username requis', code: 'INVALID_INPUT' });
     return;
   }
-  const friend = addFriend((req as AuthReq).user.id, username.trim());
-  if (!friend) {
-    res.status(400).json({ error: 'Utilisateur introuvable ou déjà dans tes amis' });
+  const result = addFriend((req as AuthReq).user.id, username.trim());
+  if (!result.ok) {
+    const message =
+      result.code === 'not_found'
+        ? 'Utilisateur introuvable. Vérifie le pseudo.'
+        : result.code === 'self'
+          ? 'Tu ne peux pas t\'ajouter toi-même.'
+          : 'Déjà dans tes amis.';
+    res.status(result.code === 'not_found' ? 404 : 400).json({ error: message, code: result.code.toUpperCase() });
     return;
   }
-  res.json({ friend });
+  res.json({ friend: result.friend });
 });
 
 app.delete('/friends/:id', authMiddleware, (req, res) => {
@@ -159,6 +169,73 @@ app.delete('/friends/:id', authMiddleware, (req, res) => {
   const removed = removeFriend((req as AuthReq).user.id, friendId);
   if (!removed) {
     res.status(404).json({ error: 'Ami introuvable' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// --- Demandes d'ami (envoyer, lister, accepter, refuser)
+app.post('/friend_requests', authMiddleware, (req, res) => {
+  const { username } = req.body ?? {};
+  if (!username || typeof username !== 'string') {
+    res.status(400).json({ error: 'username requis' });
+    return;
+  }
+  const result = createFriendRequest((req as AuthReq).user.id, username.trim());
+  if (!result.ok) {
+    const message =
+      result.code === 'not_found'
+        ? 'Utilisateur introuvable.'
+        : result.code === 'self'
+          ? 'Tu ne peux pas t\'envoyer une demande à toi-même.'
+          : result.code === 'already_friends'
+            ? 'Vous êtes déjà amis.'
+            : 'Demande déjà envoyée.';
+    res.status(result.code === 'not_found' ? 404 : 400).json({ error: message, code: result.code });
+    return;
+  }
+  res.json({ requestId: result.requestId, toUsername: result.toUsername });
+  // Émettre en temps réel au destinataire s'il est connecté (io et userIdToSocketId définis plus bas)
+  setImmediate(() => {
+    const recipientSocketId = userIdToSocketId.get(result.toUserId);
+    if (recipientSocketId && io) {
+      io.to(recipientSocketId).emit('friend_request', {
+        requestId: result.requestId,
+        fromUserId: (req as AuthReq).user.id,
+        fromUsername: (req as AuthReq).user.username,
+      });
+    }
+  });
+});
+
+app.get('/friend_requests', authMiddleware, (req, res) => {
+  const requests = listPendingFriendRequests((req as AuthReq).user.id);
+  res.json({ requests });
+});
+
+app.post('/friend_requests/:id/accept', authMiddleware, (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isInteger(requestId)) {
+    res.status(400).json({ error: 'ID invalide' });
+    return;
+  }
+  const friend = acceptFriendRequest(requestId, (req as AuthReq).user.id);
+  if (!friend) {
+    res.status(404).json({ error: 'Demande introuvable ou expirée' });
+    return;
+  }
+  res.json({ friend });
+});
+
+app.post('/friend_requests/:id/refuse', authMiddleware, (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isInteger(requestId)) {
+    res.status(400).json({ error: 'ID invalide' });
+    return;
+  }
+  const refused = refuseFriendRequest(requestId, (req as AuthReq).user.id);
+  if (!refused) {
+    res.status(404).json({ error: 'Demande introuvable ou expirée' });
     return;
   }
   res.json({ ok: true });
@@ -225,6 +302,17 @@ function emitError(socket: import('socket.io').Socket, code: string, message: st
   socket.emit('error', payload);
 }
 
+function associateSocketWithUser(socket: import('socket.io').Socket, authToken: string | undefined): void {
+  if (!authToken || typeof authToken !== 'string') return;
+  const user = getUserFromToken(authToken);
+  if (user) {
+    const prev = userIdToSocketId.get(user.id);
+    if (prev) socketToUserId.delete(prev);
+    socketToUserId.set(socket.id, user.id);
+    userIdToSocketId.set(user.id, socket.id);
+  }
+}
+
 /** Socket ID → User ID (pour envoyer les invitations aux amis) */
 const socketToUserId = new Map<string, number>();
 /** User ID → Socket ID (un seul socket par user pour les invites) */
@@ -286,6 +374,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
+      ? (payload as { authToken: string }).authToken
+      : undefined;
+    associateSocketWithUser(socket, authToken);
+
     socket.join(result.roomId);
     socket.emit('room_created', {
       roomId: result.roomId,
@@ -304,6 +397,11 @@ io.on('connection', (socket) => {
       emitError(socket, result.code, result.message);
       return;
     }
+
+    const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
+      ? (payload as { authToken: string }).authToken
+      : undefined;
+    associateSocketWithUser(socket, authToken);
 
     socket.join(payload.roomId);
     socket.emit('room_joined', {
@@ -325,6 +423,10 @@ io.on('connection', (socket) => {
       emitError(socket, result.code, result.message);
       return;
     }
+    const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
+      ? (payload as { authToken: string }).authToken
+      : undefined;
+    associateSocketWithUser(socket, authToken);
     socket.join(roomId);
     if (result.kind === 'lobby') {
       socket.emit('room_joined', {

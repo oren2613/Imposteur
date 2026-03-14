@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { RoomConfigForm } from '../components/RoomConfigForm';
-import { fetchFriends, type Friend } from '../api/auth';
+import { fetchFriends, sendFriendRequestApi, type Friend } from '../api/auth';
 import type { OnlineGameConfig } from '../types/online';
 import { UserPlus } from 'lucide-react';
 
@@ -13,6 +13,8 @@ export function OnlineLobbyScreen() {
   const { user } = useAuth();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [inviteSent, setInviteSent] = useState<number | null>(null);
+  const [friendRequestSent, setFriendRequestSent] = useState<string | null>(null);
+  const [friendRequestError, setFriendRequestError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) fetchFriends().then(setFriends);
@@ -66,33 +68,77 @@ export function OnlineLobbyScreen() {
           <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
             Joueurs ({members.length} / {config.playerCount})
           </p>
+          {friendRequestError && (
+            <p className="text-rose-600 dark:text-rose-400 text-sm mb-2">{friendRequestError}</p>
+          )}
           <ul className="space-y-2">
-            {members.map((m) => (
-              <li
-                key={m.socketId}
-                className="flex items-center justify-between gap-3 py-2 text-slate-800 dark:text-slate-100"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-medium shrink-0">
-                    {m.isHost ? '★' : '·'}
-                  </span>
-                  <span className="truncate">{m.name}</span>
-                  {m.isHost && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">(host)</span>
+            {members.map((m) => {
+              const isMe = user && m.name.trim().toLowerCase() === user.username.trim().toLowerCase();
+              const isAlreadyFriend = friends.some((f) => f.username.trim().toLowerCase() === m.name.trim().toLowerCase());
+              const canAddFriend = user && !isMe && !isAlreadyFriend;
+              const justSent = friendRequestSent?.toLowerCase() === m.name.trim().toLowerCase();
+              return (
+                <li
+                  key={m.socketId}
+                  className="flex items-center justify-between gap-3 py-2 text-slate-800 dark:text-slate-100"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-medium shrink-0">
+                      {m.isHost ? '★' : '·'}
+                    </span>
+                    <span className="truncate">
+                      {m.name}
+                      {isAlreadyFriend && (
+                        <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">(ami)</span>
+                      )}
+                      {justSent && (
+                        <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">— Demande envoyée</span>
+                      )}
+                    </span>
+                    {m.isHost && (
+                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">(host)</span>
+                    )}
+                  </div>
+                  {canAddFriend && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setFriendRequestError(null);
+                        sendFriendRequestApi(m.name)
+                          .then(() => {
+                            setFriendRequestSent(m.name);
+                            setTimeout(() => setFriendRequestSent(null), 3000);
+                          })
+                          .catch((err) => {
+                            setFriendRequestError(err instanceof Error ? err.message : 'Erreur');
+                          });
+                      }}
+                    >
+                      Demander en ami
+                    </Button>
                   )}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+            Utilise « Demander en ami » pour envoyer une demande. Une notification s&apos;affichera pour accepter ou refuser.
+          </p>
         </div>
 
-        {isHost && user && friends.length > 0 && (
+        {user && (() => {
+          const friendsNotInRoom = friends.filter(
+            (f) => !members.some((m) => m.name.trim().toLowerCase() === f.username.trim().toLowerCase())
+          );
+          if (friendsNotInRoom.length === 0) return null;
+          return (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
             <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
-              Inviter des amis
+              Inviter des amis dans la partie
             </p>
             <ul className="space-y-2">
-              {friends.map((f) => (
+              {friendsNotInRoom.map((f) => (
                 <li
                   key={f.id}
                   className="flex items-center justify-between gap-3 py-2"
@@ -114,7 +160,8 @@ export function OnlineLobbyScreen() {
               ))}
             </ul>
           </div>
-        )}
+          );
+        })()}
 
         {isHost && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">

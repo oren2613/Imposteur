@@ -104,3 +104,60 @@ export async function removeFriendApi(friendId: number): Promise<void> {
     throw new Error(data.error ?? 'Impossible de retirer');
   }
 }
+
+// --- Demandes d'ami (clic sur un nom dans le lobby)
+
+export interface FriendRequest {
+  id: number;
+  fromUserId: number;
+  fromUsername: string;
+}
+
+export async function sendFriendRequestApi(username: string): Promise<{ requestId: number }> {
+  const token = getToken();
+  if (!token) throw new Error('Non connecté');
+  const res = await fetch(`${API_BASE}/friend_requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ username: username.trim() }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? 'Impossible d\'envoyer la demande');
+  return { requestId: data.requestId };
+}
+
+export async function getPendingFriendRequestsApi(): Promise<FriendRequest[]> {
+  const token = getToken();
+  if (!token) return [];
+  const res = await fetch(`${API_BASE}/friend_requests`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.requests ?? [];
+}
+
+export async function acceptFriendRequestApi(requestId: number): Promise<Friend> {
+  const token = getToken();
+  if (!token) throw new Error('Non connecté');
+  const res = await fetch(`${API_BASE}/friend_requests/${requestId}/accept`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? 'Impossible d\'accepter');
+  return data.friend;
+}
+
+export async function refuseFriendRequestApi(requestId: number): Promise<void> {
+  const token = getToken();
+  if (!token) throw new Error('Non connecté');
+  const res = await fetch(`${API_BASE}/friend_requests/${requestId}/refuse`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? 'Impossible de refuser');
+  }
+}

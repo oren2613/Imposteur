@@ -1,27 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useGame } from '../context/GameContext';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
-import { addFriendApi, removeFriendApi, fetchFriends, type Friend } from '../api/auth';
+import {
+  addFriendApi,
+  removeFriendApi,
+  fetchFriends,
+  getPendingFriendRequestsApi,
+  acceptFriendRequestApi,
+  refuseFriendRequestApi,
+  type Friend,
+  type FriendRequest,
+} from '../api/auth';
 import { UserMinus, UserPlus } from 'lucide-react';
 
 export function FriendsScreen() {
   const { setPhase } = useGame();
   const { user } = useAuth();
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [newUsername, setNewUsername] = useState('');
   const [addError, setAddError] = useState('');
   const [adding, setAdding] = useState(false);
+
+  const loadData = useCallback(() => {
+    if (!user) return;
+    Promise.all([fetchFriends(), getPendingFriendRequestsApi()]).then(([f, r]) => {
+      setFriends(f);
+      setPendingRequests(r);
+    }).finally(() => setLoading(false));
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
       setPhase('home');
       return;
     }
-    fetchFriends().then(setFriends).finally(() => setLoading(false));
-  }, [user, setPhase]);
+    loadData();
+  }, [user, setPhase, loadData]);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +55,25 @@ export function FriendsScreen() {
       setAddError(err instanceof Error ? err.message : 'Erreur');
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleAcceptRequest = async (requestId: number) => {
+    try {
+      const friend = await acceptFriendRequestApi(requestId);
+      setFriends((prev) => (prev.some((f) => f.id === friend.id) ? prev : [...prev, friend]));
+      setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
+    } catch {
+      loadData();
+    }
+  };
+
+  const handleRefuseRequest = async (requestId: number) => {
+    try {
+      await refuseFriendRequestApi(requestId);
+      setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
+    } catch {
+      loadData();
     }
   };
 
@@ -69,6 +106,38 @@ export function FriendsScreen() {
         </form>
         {addError && (
           <p className="text-rose-600 dark:text-rose-400 text-sm">{addError}</p>
+        )}
+
+        {pendingRequests.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
+              Demandes reçues
+            </p>
+            {pendingRequests.map((req) => (
+              <div
+                key={req.id}
+                className="flex items-center justify-between gap-3 py-2 px-4 rounded-xl bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800"
+              >
+                <span className="font-medium text-slate-800 dark:text-slate-100">{req.fromUsername}</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRefuseRequest(req.id)}
+                    className="px-3 py-1 text-sm rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  >
+                    Refuser
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAcceptRequest(req.id)}
+                    className="px-3 py-1 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700"
+                  >
+                    Accepter
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
         {loading ? (
