@@ -50,6 +50,7 @@ import {
 import {
   createUser,
   listFriends,
+  listUserIdsWhoHaveAsFriend,
   addFriend,
   removeFriend,
   createFriendRequest,
@@ -306,10 +307,11 @@ function associateSocketWithUser(socket: import('socket.io').Socket, authToken: 
   if (!authToken || typeof authToken !== 'string') return;
   const user = getUserFromToken(authToken);
   if (user) {
-    const prev = userIdToSocketId.get(user.id);
+    const uid = Number(user.id);
+    const prev = userIdToSocketId.get(uid);
     if (prev) socketToUserId.delete(prev);
-    socketToUserId.set(socket.id, user.id);
-    userIdToSocketId.set(user.id, socket.id);
+    socketToUserId.set(socket.id, uid);
+    userIdToSocketId.set(uid, socket.id);
   }
 }
 
@@ -317,6 +319,23 @@ function associateSocketWithUser(socket: import('socket.io').Socket, authToken: 
 const socketToUserId = new Map<string, number>();
 /** User ID → Socket ID (un seul socket par user pour les invites) */
 const userIdToSocketId = new Map<number, string>();
+
+const DEBUG_PRESENCE = process.env.DEBUG_PRESENCE === '1';
+
+/** Notifie les amis d'un utilisateur que son statut en ligne a changé */
+function broadcastFriendStatus(userId: number, online: boolean): void {
+  const friendIds = listUserIdsWhoHaveAsFriend(userId);
+  const payload = { friendId: Number(userId), online };
+  for (const friendUserId of friendIds) {
+    const socketId = userIdToSocketId.get(Number(friendUserId));
+    if (socketId) {
+      io.to(socketId).emit('friend_status', payload);
+    }
+  }
+  if (DEBUG_PRESENCE) {
+    console.log(`[presence] userId=${userId} online=${online} notified ${friendIds.length} friend(s)`);
+  }
+}
 
 io.on('connection', (socket) => {
   socket.on('authenticate', (payload: unknown) => {
@@ -326,11 +345,13 @@ io.on('connection', (socket) => {
     if (!token) return;
     const user = getUserFromToken(token);
     if (user) {
-      const prev = userIdToSocketId.get(user.id);
+      const uid = Number(user.id);
+      const prev = userIdToSocketId.get(uid);
       if (prev) socketToUserId.delete(prev);
-      socketToUserId.set(socket.id, user.id);
-      userIdToSocketId.set(user.id, socket.id);
-      socket.emit('authenticated', { userId: user.id, username: user.username });
+      socketToUserId.set(socket.id, uid);
+      userIdToSocketId.set(uid, socket.id);
+      socket.emit('authenticated', { userId: uid, username: user.username });
+      broadcastFriendStatus(uid, true);
     }
   });
 
@@ -345,10 +366,11 @@ io.on('connection', (socket) => {
       emitError(socket, 'not_authenticated', 'Connecte-toi pour inviter des amis');
       return;
     }
-    const friendUserId = payload && typeof payload === 'object' && 'friendUserId' in payload && typeof (payload as { friendUserId: number }).friendUserId === 'number'
-      ? (payload as { friendUserId: number }).friendUserId
+    const rawFriendUserId = payload && typeof payload === 'object' && 'friendUserId' in payload
+      ? (payload as { friendUserId: unknown }).friendUserId
       : null;
-    if (friendUserId == null) {
+    const friendUserId = rawFriendUserId != null ? Number(rawFriendUserId) : NaN;
+    if (Number.isNaN(friendUserId)) {
       emitError(socket, 'invalid_payload', 'friendUserId requis');
       return;
     }
@@ -360,6 +382,24 @@ io.on('connection', (socket) => {
     const hostName = getRoomHostName(roomId) ?? 'Un ami';
     io.to(friendSocketId).emit('game_invite', { roomId, hostName });
     socket.emit('invite_sent', { success: true });
+  });
+
+  socket.on('get_online_friends', (ack: (res: { friendIds: number[] }) => void) => {
+    if (typeof ack !== 'function') return;
+    const userId = socketToUserId.get(socket.id);
+    if (userId == null) {
+      if (DEBUG_PRESENCE) console.log('[presence] get_online_friends: socket not associated');
+      ack({ friendIds: [] });
+      return;
+    }
+    const friends = listFriends(userId);
+    const friendIds = friends
+      .filter((f) => userIdToSocketId.has(Number(f.id)))
+      .map((f) => Number(f.id));
+    if (DEBUG_PRESENCE) {
+      console.log(`[presence] get_online_friends userId=${userId} totalFriends=${friends.length} online=${friendIds.length} ids=${JSON.stringify(friendIds)}`);
+    }
+    ack({ friendIds });
   });
 
   socket.on('create_room', (payload: unknown) => {
@@ -378,6 +418,8 @@ io.on('connection', (socket) => {
       ? (payload as { authToken: string }).authToken
       : undefined;
     associateSocketWithUser(socket, authToken);
+    const uidCreate = socketToUserId.get(socket.id);
+    if (uidCreate != null) broadcastFriendStatus(uidCreate, true);
 
     socket.join(result.roomId);
     socket.emit('room_created', {
@@ -402,6 +444,8 @@ io.on('connection', (socket) => {
       ? (payload as { authToken: string }).authToken
       : undefined;
     associateSocketWithUser(socket, authToken);
+    const uidJoin = socketToUserId.get(socket.id);
+    if (uidJoin != null) broadcastFriendStatus(uidJoin, true);
 
     socket.join(payload.roomId);
     socket.emit('room_joined', {
@@ -427,6 +471,8 @@ io.on('connection', (socket) => {
       ? (payload as { authToken: string }).authToken
       : undefined;
     associateSocketWithUser(socket, authToken);
+    const uidReconnect = socketToUserId.get(socket.id);
+    if (uidReconnect != null) broadcastFriendStatus(uidReconnect, true);
     socket.join(roomId);
     if (result.kind === 'lobby') {
       socket.emit('room_joined', {
@@ -669,6 +715,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const uid = socketToUserId.get(socket.id);
     if (uid != null) {
+      broadcastFriendStatus(uid, false);
       socketToUserId.delete(socket.id);
       if (userIdToSocketId.get(uid) === socket.id) userIdToSocketId.delete(uid);
     }

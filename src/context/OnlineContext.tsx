@@ -15,7 +15,8 @@ import {
 } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useGame } from './GameContext';
-import { getToken } from '../api/auth';
+import { getToken, fetchFriends } from '../api/auth';
+import type { Friend } from '../api/auth';
 import type {
   RoomLobbyState,
   RoomGameState,
@@ -127,6 +128,18 @@ interface OnlineContextValue {
   pendingFriendRequest: { requestId: number; fromUserId: number; fromUsername: string } | null;
   /** Fermer la notification de demande d'ami sans accepter/refuser */
   clearPendingFriendRequest: () => void;
+  /** Liste d'amis (pour afficher l'icône ami partout) */
+  friendsList: Friend[];
+  /** Recharger la liste d'amis (après acceptation d'une demande, etc.) */
+  loadFriends: () => Promise<void>;
+  /** IDs des amis actuellement en ligne (socket connecté et authentifié) */
+  onlineFriendIds: number[];
+  /** Rafraîchir la liste des amis en ligne (émet get_online_friends) */
+  fetchOnlineFriends: () => void;
+  /** Erreur d'invitation (ex. "Ami hors ligne" si invite_sent success: false) */
+  inviteError: string | null;
+  /** Effacer l'erreur d'invitation */
+  clearInviteError: () => void;
 }
 
 const OnlineContext = createContext<OnlineContextValue | null>(null);
@@ -147,7 +160,11 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     fromUserId: number;
     fromUsername: string;
   } | null>(null);
+  const [friendsList, setFriendsList] = useState<Friend[]>([]);
+  const [onlineFriendIds, setOnlineFriendIds] = useState<number[]>([]);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const inviteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -183,6 +200,33 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
     socket.on('friend_request', (payload: { requestId: number; fromUserId: number; fromUsername: string }) => {
       setPendingFriendRequest(payload);
+    });
+
+    socket.on('friend_status', (payload: { friendId: number; online: boolean }) => {
+      const id = Number(payload.friendId);
+      if (Number.isNaN(id)) return;
+      setOnlineFriendIds((prev) => {
+        const has = prev.includes(id);
+        if (payload.online && !has) return [...prev, id];
+        if (!payload.online && has) return prev.filter((x) => x !== id);
+        return prev;
+      });
+    });
+
+    socket.on('invite_sent', (payload: { success: boolean; message?: string }) => {
+      if (inviteErrorTimeoutRef.current) {
+        clearTimeout(inviteErrorTimeoutRef.current);
+        inviteErrorTimeoutRef.current = null;
+      }
+      if (payload.success) {
+        setInviteError(null);
+      } else {
+        setInviteError(payload.message ?? 'Ami hors ligne');
+        inviteErrorTimeoutRef.current = setTimeout(() => {
+          inviteErrorTimeoutRef.current = null;
+          setInviteError(null);
+        }, 5000);
+      }
     });
 
     socket.on('room_created', (payload: { roomId: string; roomState: RoomLobbyState }) => {
@@ -269,6 +313,12 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(() => {
     clearErrorTimeout();
+    if (inviteErrorTimeoutRef.current) {
+      clearTimeout(inviteErrorTimeoutRef.current);
+      inviteErrorTimeoutRef.current = null;
+    }
+    setInviteError(null);
+    setOnlineFriendIds([]);
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current.removeAllListeners();
@@ -417,10 +467,44 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   const clearPendingFriendRequest = useCallback(() => setPendingFriendRequest(null), []);
 
+  const loadFriends = useCallback(async () => {
+    if (!getToken()) return;
+    const list = await fetchFriends();
+    setFriendsList(list);
+  }, []);
+
+  useEffect(() => {
+    if ((roomState || gameState) && getToken()) {
+      fetchFriends().then(setFriendsList);
+    } else {
+      setFriendsList([]);
+    }
+  }, [roomState, gameState]);
+
   const inviteFriend = useCallback((friendUserId: number) => {
+    setInviteError(null);
     if (socketRef.current?.connected) {
       socketRef.current.emit('invite_to_room', { friendUserId });
     }
+  }, []);
+
+  const fetchOnlineFriends = useCallback(() => {
+    if (!socketRef.current?.connected) return;
+    socketRef.current.emit('get_online_friends', (res: { friendIds?: unknown }) => {
+      const raw = res?.friendIds;
+      const ids = Array.isArray(raw)
+        ? raw.map((x) => Number(x)).filter((n) => !Number.isNaN(n))
+        : [];
+      setOnlineFriendIds(ids);
+    });
+  }, []);
+
+  const clearInviteError = useCallback(() => {
+    if (inviteErrorTimeoutRef.current) {
+      clearTimeout(inviteErrorTimeoutRef.current);
+      inviteErrorTimeoutRef.current = null;
+    }
+    setInviteError(null);
   }, []);
 
   const myStats = useMemo(() => {
@@ -462,6 +546,12 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       inviteFriend,
       pendingFriendRequest,
       clearPendingFriendRequest,
+      friendsList,
+      loadFriends,
+      onlineFriendIds,
+      fetchOnlineFriends,
+      inviteError,
+      clearInviteError,
     }),
     [
       roomState,
@@ -475,6 +565,9 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       myStats,
       pendingInvite,
       pendingFriendRequest,
+      friendsList,
+      onlineFriendIds,
+      inviteError,
       createRoom,
       joinRoom,
       leaveRoom,
@@ -488,7 +581,10 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       clearError,
       clearPendingInvite,
       clearPendingFriendRequest,
+      loadFriends,
       inviteFriend,
+      fetchOnlineFriends,
+      clearInviteError,
     ]
   );
 

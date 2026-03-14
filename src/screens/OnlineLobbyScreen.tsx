@@ -4,21 +4,29 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { RoomConfigForm } from '../components/RoomConfigForm';
-import { fetchFriends, sendFriendRequestApi, type Friend } from '../api/auth';
+import { FriendsInLobbyPanel } from '../components/FriendsInLobbyPanel';
+import { sendFriendRequestApi } from '../api/auth';
 import type { OnlineGameConfig } from '../types/online';
-import { UserPlus } from 'lucide-react';
+import { Heart } from 'lucide-react';
 
 export function OnlineLobbyScreen() {
-  const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError, inviteFriend } = useOnline();
+  const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError, friendsList, loadFriends, fetchOnlineFriends } = useOnline();
   const { user } = useAuth();
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [inviteSent, setInviteSent] = useState<number | null>(null);
+  const [inviteSentFriendId, setInviteSentFriendId] = useState<number | null>(null);
   const [friendRequestSent, setFriendRequestSent] = useState<string | null>(null);
   const [friendRequestError, setFriendRequestError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) fetchFriends().then(setFriends);
-  }, [user]);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && user) loadFriends();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [user, loadFriends]);
+
+  useEffect(() => {
+    if (roomState && user) fetchOnlineFriends();
+  }, [roomState, user, fetchOnlineFriends]);
 
   if (!roomState || !roomId) {
     return (
@@ -74,7 +82,7 @@ export function OnlineLobbyScreen() {
           <ul className="space-y-2">
             {members.map((m) => {
               const isMe = user && m.name.trim().toLowerCase() === user.username.trim().toLowerCase();
-              const isAlreadyFriend = friends.some((f) => f.username.trim().toLowerCase() === m.name.trim().toLowerCase());
+              const isAlreadyFriend = friendsList.some((f) => f.username.trim().toLowerCase() === m.name.trim().toLowerCase());
               const canAddFriend = user && !isMe && !isAlreadyFriend;
               const justSent = friendRequestSent?.toLowerCase() === m.name.trim().toLowerCase();
               return (
@@ -86,10 +94,10 @@ export function OnlineLobbyScreen() {
                     <span className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-medium shrink-0">
                       {m.isHost ? '★' : '·'}
                     </span>
-                    <span className="truncate">
+                    <span className="truncate flex items-center gap-1">
                       {m.name}
                       {isAlreadyFriend && (
-                        <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">(ami)</span>
+                        <Heart className="w-4 h-4 shrink-0 text-violet-500 fill-violet-500" aria-label="ami" />
                       )}
                       {justSent && (
                         <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">— Demande envoyée</span>
@@ -127,41 +135,16 @@ export function OnlineLobbyScreen() {
           </p>
         </div>
 
-        {user && (() => {
-          const friendsNotInRoom = friends.filter(
-            (f) => !members.some((m) => m.name.trim().toLowerCase() === f.username.trim().toLowerCase())
-          );
-          if (friendsNotInRoom.length === 0) return null;
-          return (
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
-            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
-              Inviter des amis dans la partie
-            </p>
-            <ul className="space-y-2">
-              {friendsNotInRoom.map((f) => (
-                <li
-                  key={f.id}
-                  className="flex items-center justify-between gap-3 py-2"
-                >
-                  <span className="text-slate-800 dark:text-slate-100 truncate">{f.username}</span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      inviteFriend(f.id);
-                      setInviteSent(f.id);
-                      setTimeout(() => setInviteSent(null), 3000);
-                    }}
-                  >
-                    <UserPlus className="w-4 h-4 mr-1" />
-                    {inviteSent === f.id ? 'Envoyé' : 'Inviter'}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          );
-        })()}
+        {user && (
+          <FriendsInLobbyPanel
+            memberNames={members.map((m) => m.name)}
+            onInviteClick={(friendId) => {
+              setInviteSentFriendId(friendId);
+              setTimeout(() => setInviteSentFriendId(null), 3000);
+            }}
+            inviteSentFriendId={inviteSentFriendId}
+          />
+        )}
 
         {isHost && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">

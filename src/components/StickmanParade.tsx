@@ -166,7 +166,7 @@ export function StickmanParade() {
     <div className="stickman-parade" aria-hidden>
       <Stickman delay={0} direction={1} duration={20} />
       <StickmanThinking delay={3} direction={-1} duration={22} />
-      <Stickman isImpostor delay={2} direction={1} duration={18} />
+      <Stickman delay={2} direction={1} duration={18} />
       <Stickman delay={7} direction={-1} duration={24} />
       {/* Marche lente + salut (reste en mouvement) */}
       <Stickman pose="wave" delay={1} direction={1} duration={36} />

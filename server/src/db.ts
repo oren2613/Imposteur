@@ -109,6 +109,15 @@ export function listFriends(userId: number): { id: number; username: string }[] 
   return rows;
 }
 
+/** IDs des utilisateurs qui ont userId dans leur liste d'amis (pour notifier présence en ligne) */
+export function listUserIdsWhoHaveAsFriend(userId: number): number[] {
+  const rows = getDb().prepare(`
+    SELECT CASE WHEN user_id = ? THEN friend_id ELSE user_id END AS other_id
+    FROM friends WHERE user_id = ? OR friend_id = ?
+  `).all(userId, userId, userId) as { other_id: number }[];
+  return rows.map((r) => Number(r.other_id));
+}
+
 export type AddFriendResult =
   | { ok: true; friend: { id: number; username: string } }
   | { ok: false; code: 'not_found' | 'self' | 'already_friends' };

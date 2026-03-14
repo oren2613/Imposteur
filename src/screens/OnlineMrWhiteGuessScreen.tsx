@@ -1,11 +1,17 @@
 import { useState } from 'react';
+import { Heart } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
 
+function isFriend(name: string, friendsList: { username: string }[]): boolean {
+  const n = name.trim().toLowerCase();
+  return friendsList.some((f) => f.username.trim().toLowerCase() === n);
+}
+
 export function OnlineMrWhiteGuessScreen() {
-  const { gameState, myPlayerId, error, submitMrWhiteGuess, clearError } = useOnline();
+  const { gameState, myPlayerId, error, submitMrWhiteGuess, clearError, friendsList } = useOnline();
   const [guess, setGuess] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
@@ -35,8 +41,14 @@ export function OnlineMrWhiteGuessScreen() {
             </button>
           </div>
         )}
-        <p className="text-slate-600 dark:text-slate-400 text-center">
-          {mrWhite?.name ?? 'Mr. White'} a été éliminé. Il peut tenter de deviner le mot des Citoyens.
+        <p className="text-slate-600 dark:text-slate-400 text-center flex flex-wrap items-center justify-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5">
+            {mrWhite?.name ?? 'Mr. White'}
+            {mrWhite?.name && isFriend(mrWhite.name, friendsList) && (
+              <Heart className="w-4 h-4 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+            )}
+          </span>
+          {' '}a été éliminé. Il peut tenter de deviner le mot des Citoyens.
         </p>
         {isMrWhite ? (
           <>

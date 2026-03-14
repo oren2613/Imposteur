@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Heart } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
@@ -8,8 +9,13 @@ import { ViewMyWordModal } from '../components/ViewMyWordModal';
 /** Valeur envoyée au backend pour un vote blanc (personne éliminée) */
 const VOTE_BLANK = 'BLANK';
 
+function isFriend(name: string, friendsList: { username: string }[]): boolean {
+  const n = name.trim().toLowerCase();
+  return friendsList.some((f) => f.username.trim().toLowerCase() === n);
+}
+
 export function OnlineVoteScreen() {
-  const { gameState, myWord, myPlayerId, error, vote, clearError } = useOnline();
+  const { gameState, myWord, myPlayerId, error, vote, clearError, friendsList } = useOnline();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMyWord, setShowMyWord] = useState(false);
 
@@ -68,7 +74,12 @@ export function OnlineVoteScreen() {
                 }
               `}
             >
-              {p.name}
+              <span className="inline-flex items-center gap-1.5">
+                {p.name}
+                {isFriend(p.name, friendsList) && (
+                  <Heart className="w-4 h-4 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+                )}
+              </span>
             </button>
           ))}
         </div>

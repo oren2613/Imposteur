@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff, Heart } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
@@ -8,8 +8,13 @@ import { ViewMyWordModal } from '../components/ViewMyWordModal';
 
 const TICK_MS = 200;
 
+function isFriend(name: string, friendsList: { username: string }[]): boolean {
+  const n = name.trim().toLowerCase();
+  return friendsList.some((f) => f.username.trim().toLowerCase() === n);
+}
+
 export function OnlineDiscussionScreen() {
-  const { gameState, myPlayerId, myWord, error, discussionPass, clearError } = useOnline();
+  const { gameState, myPlayerId, myWord, error, discussionPass, clearError, friendsList } = useOnline();
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [showMyWord, setShowMyWord] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
@@ -87,8 +92,11 @@ export function OnlineDiscussionScreen() {
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                 En train de parler
               </p>
-              <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+              <p className="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 {currentPlayer?.name ?? '…'}
+                {currentPlayer?.name && isFriend(currentPlayer.name, friendsList) && (
+                  <Heart className="w-6 h-6 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+                )}
               </p>
             </div>
 
@@ -121,8 +129,11 @@ export function OnlineDiscussionScreen() {
                       >
                         {status === 'passed' ? '✓' : idx + 1}
                       </span>
-                      <span className="font-medium text-slate-800 dark:text-slate-100">
+                      <span className="font-medium text-slate-800 dark:text-slate-100 inline-flex items-center gap-1">
                         {p?.name ?? '…'}
+                        {p?.name && isFriend(p.name, friendsList) && (
+                          <Heart className="w-3.5 h-3.5 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+                        )}
                       </span>
                       {status === 'speaking' && (
                         <span className="ml-auto text-xs text-violet-600 dark:text-violet-400 font-medium">

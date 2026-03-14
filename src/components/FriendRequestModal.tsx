@@ -4,7 +4,7 @@ import { Button } from './Button';
 import { acceptFriendRequestApi, refuseFriendRequestApi } from '../api/auth';
 
 export function FriendRequestModal() {
-  const { pendingFriendRequest, clearPendingFriendRequest } = useOnline();
+  const { pendingFriendRequest, clearPendingFriendRequest, loadFriends } = useOnline();
   const [loading, setLoading] = useState(false);
 
   if (!pendingFriendRequest) return null;
@@ -13,6 +13,7 @@ export function FriendRequestModal() {
     setLoading(true);
     try {
       await acceptFriendRequestApi(pendingFriendRequest.requestId);
+      await loadFriends();
       clearPendingFriendRequest();
     } catch {
       // garder le modal ouvert en cas d'erreur
