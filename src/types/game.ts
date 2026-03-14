@@ -18,7 +18,7 @@ export interface Player {
   eliminated: boolean;
 }
 
-/** Phase actuelle de la partie */
+/** Phase actuelle de la partie (local) ou écran (online) */
 export type GamePhase =
   | 'home'
   | 'rules'
@@ -29,7 +29,15 @@ export type GamePhase =
   | 'vote'
   | 'eliminatedReveal'
   | 'mrWhiteGuess'
-  | 'end';
+  | 'end'
+  | 'onlineCreateOrJoin'
+  | 'onlineLobby'
+  | 'onlineRoleReveal'
+  | 'onlineDiscussion'
+  | 'onlineVote'
+  | 'onlineEliminatedReveal'
+  | 'onlineMrWhiteGuess'
+  | 'onlineEnd';
 
 /** Configuration de la partie (avant distribution des rôles) */
 export interface GameConfig {

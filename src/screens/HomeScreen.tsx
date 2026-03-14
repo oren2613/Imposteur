@@ -23,6 +23,14 @@ export function HomeScreen() {
           fullWidth
           variant="secondary"
           size="lg"
+          onClick={() => setPhase('onlineCreateOrJoin')}
+        >
+          Jouer en ligne
+        </Button>
+        <Button
+          fullWidth
+          variant="ghost"
+          size="lg"
           onClick={() => setPhase('rules')}
         >
           Règles
