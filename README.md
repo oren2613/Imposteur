@@ -2,6 +2,10 @@
 
 Jeu d'ambiance en local : les joueurs découvrent leur rôle et leur mot secret sur un seul appareil, puis jouent hors écran. L'application gère la configuration, la distribution des rôles, le vote, la dernière chance de Mr. White et la fin de partie.
 
+## Aperçu
+
+![Menu principal — Nouvelle partie, Jouer en ligne, Règles, Historique](screenshot-menu.png)
+
 ## Lancer le projet
 
 ```bash
