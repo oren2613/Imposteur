@@ -1,11 +1,12 @@
 import { useGame } from '../context/GameContext';
 import { Button } from '../components/Button';
+import { StickmanParade } from '../components/StickmanParade';
 
 export function HomeScreen() {
   const { setPhase } = useGame();
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 max-w-md mx-auto">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 max-w-md mx-auto relative pb-28">
       <div className="text-center mb-10 animate-fade-in">
         <h1 className="text-4xl sm:text-5xl font-bold text-slate-800 dark:text-slate-100 mb-2">
           Imposteur
@@ -44,6 +45,8 @@ export function HomeScreen() {
           Historique
         </Button>
       </div>
+
+      <StickmanParade />
     </div>
   );
 }

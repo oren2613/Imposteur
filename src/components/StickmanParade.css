@@ -1,0 +1,225 @@
+.stickman-parade {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  /* Hauteur suffisante pour que la bulle ne dépasse jamais (bulle ~38px au-dessus du stickman) */
+  height: 100px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.stickman {
+  --duration: 18s;
+  --delay: 0s;
+  position: absolute;
+  bottom: 4px;
+  width: 28px;
+  height: 48px;
+  left: -40px;
+  color: var(--stickman-color, #475569);
+  animation: stickman-walk var(--duration) linear infinite;
+  animation-delay: var(--delay);
+}
+
+.stickman--reverse {
+  left: auto;
+  right: -40px;
+  animation-name: stickman-walk-reverse;
+}
+
+/* Salut en marchant (bras qui bouge) */
+.stickman--wave .stickman__arm--left {
+  transform-origin: 12px 16px;
+  animation: arm-wave 1.2s ease-in-out infinite;
+}
+
+.stickman--wave .stickman__arm--right {
+  animation: none;
+}
+
+@keyframes arm-wave {
+  0%, 100% { transform: rotate(-40deg); }
+  50% { transform: rotate(10deg); }
+}
+
+/* Pointer (léger mouvement) */
+.stickman--point .stickman__arm--left {
+  transform-origin: 12px 16px;
+  animation: arm-point 2s ease-in-out infinite;
+}
+
+@keyframes arm-point {
+  0%, 90%, 100% { transform: rotate(-55deg); }
+  45% { transform: rotate(-50deg); }
+}
+
+.stickman--impostor {
+  color: #0f172a;
+  --stickman-color: #0f172a;
+}
+
+html.dark .stickman {
+  color: var(--stickman-color, #94a3b8);
+}
+
+html.dark .stickman--impostor {
+  color: #f8fafc;
+  --stickman-color: #f8fafc;
+}
+
+.stickman__svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+}
+
+.stickman--impostor .stickman__head {
+  stroke-width: 2;
+}
+
+/* Chapeau imposteur (couleur déjà via currentColor) */
+.stickman--impostor .stickman__hat {
+  color: inherit;
+}
+
+/* ----- Stickman qui réfléchit + bulle ----- */
+.stickman--thinking {
+  width: 28px;
+}
+
+.stickman__bubble {
+  position: absolute;
+  /* Bien au-dessus de la tête mais contenu dans la zone (stickman ~48px, marge top ~40px) */
+  top: -32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  background: var(--bubble-bg, rgba(255, 255, 255, 0.95));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.95;
+  animation: bubble-float 2s ease-in-out infinite, bubble-visibility 12s ease-in-out infinite;
+}
+
+/* La bulle n’apparaît qu’une partie du temps (moins souvent) */
+@keyframes bubble-visibility {
+  0%, 22% { opacity: 0.95; }
+  28%, 72% { opacity: 0; }
+  78%, 100% { opacity: 0.95; }
+}
+
+/* Petit cercle de liaison bulle → tête */
+.stickman__bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  background: var(--bubble-bg, rgba(255, 255, 255, 0.95));
+}
+
+html.dark .stickman__bubble {
+  --bubble-bg: rgba(15, 23, 42, 0.95);
+}
+
+.stickman__bubble-svg {
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+
+.stickman--thinking .stickman__arm--left {
+  transform-origin: 12px 16px;
+  animation: arm-think 1.5s ease-in-out infinite;
+}
+
+@keyframes bubble-float {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-3px); }
+}
+
+@keyframes arm-think {
+  0%, 100% { transform: rotate(-25deg); }
+  50% { transform: rotate(-35deg); }
+}
+
+/* Traversée de l'écran : gauche -> droite */
+@keyframes stickman-walk {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(100vw + 80px));
+  }
+}
+
+/* Droite -> gauche */
+@keyframes stickman-walk-reverse {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-100vw - 80px));
+  }
+}
+
+/* Animation des jambes (via rotation ou décalage) - optionnel, le translateY simule le pas */
+.stickman__leg--left {
+  transform-origin: 12px 26px;
+  animation: leg-left 0.4s ease-in-out infinite;
+}
+
+.stickman__leg--right {
+  transform-origin: 12px 26px;
+  animation: leg-right 0.4s ease-in-out infinite;
+}
+
+@keyframes leg-left {
+  0%,
+  100% {
+    transform: rotate(-8deg);
+  }
+  50% {
+    transform: rotate(8deg);
+  }
+}
+
+@keyframes leg-right {
+  0%,
+  100% {
+    transform: rotate(8deg);
+  }
+  50% {
+    transform: rotate(-8deg);
+  }
+}
+
+/* Bras qui bougent légèrement */
+.stickman__arm--left {
+  transform-origin: 12px 16px;
+  animation: arm-swing 0.5s ease-in-out infinite;
+}
+
+.stickman__arm--right {
+  transform-origin: 12px 16px;
+  animation: arm-swing 0.5s ease-in-out infinite 0.25s;
+}
+
+@keyframes arm-swing {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
