@@ -449,6 +449,6 @@ setInterval(() => {
   }
 }, DISCUSSION_TIMEOUT_CHECK_MS);
 
-httpServer.listen(PORT, () => {
-  console.log(`Serveur prêt sur http://localhost:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Serveur prêt sur http://0.0.0.0:${PORT}`);
 });
