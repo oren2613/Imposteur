@@ -1,0 +1,22 @@
+# Build monorepo Imposteur (client + serveur)
+# Nécessite Node 22 pour better-sqlite3 (dev local) et le build Vite
+
+[phases.setup]
+nixPkgs = ["nodejs_22", "python3", "gcc"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+  "npm ci",
+  "cd server && npm ci",
+]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = [
+  "npm run build",
+  "cd server && rm -rf public && cp -r ../dist public && npm run build",
+]
+
+[start]
+cmd = "node server/dist/server/src/index.js"
