@@ -5,14 +5,28 @@ import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { RoomConfigForm } from '../components/RoomConfigForm';
 import { FriendsInLobbyPanel } from '../components/FriendsInLobbyPanel';
+import { LobbyReadyPanel } from '../components/LobbyReadyPanel';
 import { sendFriendRequestApi } from '../api/auth';
 import { buildRoomInviteLink } from '../utils/roomInviteLink';
 import type { OnlineGameConfig } from '../types/online';
-import { Heart, Link2 } from 'lucide-react';
+import { Heart, Link2, Check } from 'lucide-react';
 import { UserAvatar } from '../components/UserAvatar';
 
 export function OnlineLobbyScreen() {
-  const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError, friendsList, loadFriends, fetchOnlineFriends } = useOnline();
+  const {
+    roomState,
+    roomId,
+    isHost,
+    localPlayerName,
+    error,
+    leaveRoom,
+    setLobbyReady,
+    updateRoomConfig,
+    clearError,
+    friendsList,
+    loadFriends,
+    fetchOnlineFriends,
+  } = useOnline();
   const { user } = useAuth();
   const [inviteSentFriendId, setInviteSentFriendId] = useState<number | null>(null);
   const [friendRequestSent, setFriendRequestSent] = useState<string | null>(null);
@@ -39,8 +53,13 @@ export function OnlineLobbyScreen() {
     );
   }
 
-  const { members, config } = roomState;
-  const canStart = isHost && members.length === config.playerCount;
+  const { members, config, countdownEndsAt } = roomState;
+  const isFull = members.length === config.playerCount;
+  const myMember = members.find(
+    (m) => localPlayerName && m.name.trim().toLowerCase() === localPlayerName.trim().toLowerCase()
+  );
+  const amReady = myMember?.ready ?? false;
+  const readyCount = members.filter((m) => m.ready).length;
 
   const handleConfigChange = (newConfig: OnlineGameConfig) => {
     clearError();
@@ -124,8 +143,11 @@ export function OnlineLobbyScreen() {
                         <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">— Demande envoyée</span>
                       )}
                     </span>
-                    {m.isHost && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">(host)</span>
+                    {m.ready && (
+                      <span className="inline-flex items-center gap-0.5 text-xs text-emerald-600 dark:text-emerald-400 shrink-0">
+                        <Check className="w-3.5 h-3.5" />
+                        Prêt
+                      </span>
                     )}
                   </div>
                   {canAddFriend && (
@@ -167,7 +189,7 @@ export function OnlineLobbyScreen() {
           />
         )}
 
-        {isHost && (
+        {isHost && !isFull && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
             <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
               Paramètres de la partie
@@ -180,21 +202,33 @@ export function OnlineLobbyScreen() {
           </div>
         )}
 
-        {isHost && (
-          <Button
-            fullWidth
-            size="lg"
-            onClick={() => { clearError(); startGame(); }}
-            disabled={!canStart}
-          >
-            Lancer la partie
-          </Button>
-        )}
-
-        {isHost && !canStart && (
+        {isFull ? (
+          <LobbyReadyPanel
+            countdownEndsAt={countdownEndsAt}
+            readyCount={readyCount}
+            totalCount={members.length}
+            isReady={amReady}
+            onToggleReady={(ready) => {
+              clearError();
+              setLobbyReady(ready);
+            }}
+          />
+        ) : (
           <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
             En attente de {config.playerCount - members.length} joueur(s)…
           </p>
+        )}
+
+        {isFull && !isHost && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
+              Paramètres de la partie
+            </p>
+            <p className="text-sm text-slate-800 dark:text-slate-100">
+              {config.playerCount} joueurs · {config.impostorCount} imposteur{config.impostorCount > 1 ? 's' : ''}
+              {config.mrWhiteEnabled ? ' · Mr. White activé' : ''}
+            </p>
+          </div>
         )}
       </div>
     </Layout>

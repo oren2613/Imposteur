@@ -15,8 +15,10 @@ import {
   leaveRoom,
   handleDisconnect,
   reconnectToRoom,
-  startGame,
-  startNextRound,
+  startGameInternal,
+  startNextRoundInternal,
+  syncLobbyCountdown,
+  setLobbyReady,
   getPrivateView,
   getRoomIdBySocket,
   transitionRoleRevealToDiscussion,
@@ -335,6 +337,111 @@ setMatchmakingTimeoutHandler(() => {
 
 /** Timers de countdown roleReveal → discussion (roomId → timeout) */
 const roleRevealTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const lobbyCountdownTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const endIntermissionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearLobbyCountdownTimer(roomId: string): void {
+  const timer = lobbyCountdownTimers.get(roomId);
+  if (timer) {
+    clearTimeout(timer);
+    lobbyCountdownTimers.delete(roomId);
+  }
+}
+
+function clearEndIntermissionTimer(roomId: string): void {
+  const timer = endIntermissionTimers.get(roomId);
+  if (timer) {
+    clearTimeout(timer);
+    endIntermissionTimers.delete(roomId);
+  }
+}
+
+function scheduleLobbyCountdown(roomId: string, endsAt: number): void {
+  clearLobbyCountdownTimer(roomId);
+  const delay = Math.max(0, endsAt - Date.now());
+  lobbyCountdownTimers.set(
+    roomId,
+    setTimeout(() => {
+      lobbyCountdownTimers.delete(roomId);
+      triggerAutoGameStart(roomId);
+    }, delay)
+  );
+}
+
+function scheduleEndIntermission(roomId: string, endsAt: number): void {
+  clearEndIntermissionTimer(roomId);
+  const delay = Math.max(0, endsAt - Date.now());
+  endIntermissionTimers.set(
+    roomId,
+    setTimeout(() => {
+      endIntermissionTimers.delete(roomId);
+      triggerAutoNextRound(roomId);
+    }, delay)
+  );
+}
+
+function broadcastGameStart(roomId: string, roomState: import('./types.js').RoomGameState): void {
+  const roomSockets = io.sockets.adapter.rooms.get(roomId);
+  if (roomSockets) {
+    for (const sid of roomSockets) {
+      const view = getPrivateView(roomId, sid);
+      if (view) {
+        const payload: YourRolePayload = { word: view.word, playerId: view.playerId };
+        io.to(sid).emit('your_role', payload);
+      }
+    }
+  }
+  io.to(roomId).emit('game_state', { roomState });
+  const existing = roleRevealTimers.get(roomId);
+  if (existing) clearTimeout(existing);
+  roleRevealTimers.set(
+    roomId,
+    setTimeout(() => {
+      roleRevealTimers.delete(roomId);
+      const newState = transitionRoleRevealToDiscussion(roomId);
+      if (newState) {
+        io.to(roomId).emit('game_state', { roomState: newState });
+      }
+    }, ROLE_REVEAL_COUNTDOWN_MS)
+  );
+}
+
+function triggerAutoGameStart(roomId: string): void {
+  const result = startGameInternal(roomId);
+  if (!result.ok) return;
+  clearLobbyCountdownTimer(roomId);
+  broadcastGameStart(roomId, result.roomState);
+}
+
+function triggerAutoNextRound(roomId: string): void {
+  const roomSockets = io.sockets.adapter.rooms.get(roomId);
+  const socketIdsInRoom = roomSockets ? [...roomSockets] : [];
+  const result = startNextRoundInternal(roomId, socketIdsInRoom);
+  if (!result.ok) return;
+  clearEndIntermissionTimer(roomId);
+  broadcastGameStart(roomId, result.roomState);
+}
+
+function broadcastGameState(roomId: string, roomState: import('./types.js').RoomGameState): void {
+  io.to(roomId).emit('game_state', { roomState });
+  if (roomState.phase === 'end' && roomState.nextRoundCountdownEndsAt) {
+    scheduleEndIntermission(roomId, roomState.nextRoundCountdownEndsAt);
+  }
+}
+
+function handleLobbyCountdownAfterChange(roomId: string): void {
+  const { change, roomState } = syncLobbyCountdown(roomId);
+  if (change !== 'unchanged' && roomState) {
+    io.to(roomId).emit('room_state', { roomState });
+  }
+  if (roomState?.countdownEndsAt) {
+    if (change === 'started' || !lobbyCountdownTimers.has(roomId)) {
+      scheduleLobbyCountdown(roomId, roomState.countdownEndsAt);
+    }
+  } else if (change === 'cancelled') {
+    clearLobbyCountdownTimer(roomId);
+  }
+}
 
 function isCreateRoomPayload(p: unknown): p is CreateRoomPayload {
   return (
@@ -442,6 +549,7 @@ async function applyMatchmakingMatch(
   if (finalRoomState) {
     io.to(match.roomId).emit('room_state', { roomState: finalRoomState });
   }
+  handleLobbyCountdownAfterChange(match.roomId);
 }
 
 async function associateSocketWithUser(socket: import('socket.io').Socket, authToken: string | undefined): Promise<void> {
@@ -665,6 +773,7 @@ io.on('connection', (socket) => {
         youAreHost: result.youAreHost,
       });
       io.to(payload.roomId).emit('room_state', { roomState: result.roomState });
+      handleLobbyCountdownAfterChange(payload.roomId);
     })();
   });
 
@@ -695,11 +804,45 @@ io.on('connection', (socket) => {
           youAreHost: result.youAreHost,
         });
         io.to(roomId).emit('room_state', { roomState: result.roomState });
+        handleLobbyCountdownAfterChange(roomId);
       } else {
         socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
         socket.emit('game_state', { roomState: result.roomState });
       }
     })();
+  });
+
+  socket.on('lobby_ready', (payload: unknown) => {
+    const roomId = getRoomIdBySocket(socket.id);
+    if (!roomId) {
+      emitError(socket, 'not_in_room', 'Vous n\'êtes dans aucune room');
+      return;
+    }
+    const ready =
+      payload !== null &&
+      typeof payload === 'object' &&
+      'ready' in payload &&
+      (payload as { ready: unknown }).ready === true;
+    const roomSockets = io.sockets.adapter.rooms.get(roomId);
+    const socketIdsInRoom = roomSockets ? [...roomSockets] : [];
+    const result = setLobbyReady(roomId, socket.id, ready, socketIdsInRoom);
+    if (!result.ok) {
+      emitError(socket, result.code, result.message);
+      return;
+    }
+    if ('roomState' in result) {
+      io.to(roomId).emit('room_state', { roomState: result.roomState });
+      if (result.allReady) {
+        clearLobbyCountdownTimer(roomId);
+        triggerAutoGameStart(roomId);
+      }
+    } else {
+      broadcastGameState(roomId, result.gameState);
+      if (result.allReady) {
+        clearEndIntermissionTimer(roomId);
+        triggerAutoNextRound(roomId);
+      }
+    }
   });
 
   socket.on('start_game', () => {
@@ -709,38 +852,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = startGame(roomId, socket.id);
+    const result = startGameInternal(roomId);
     if (!result.ok) {
       emitError(socket, result.code, result.message);
       return;
     }
-
-    const roomSockets = io.sockets.adapter.rooms.get(roomId);
-    if (roomSockets) {
-      for (const sid of roomSockets) {
-        const view = getPrivateView(roomId, sid);
-        if (view) {
-          const payload: YourRolePayload = { word: view.word, playerId: view.playerId };
-          io.to(sid).emit('your_role', payload);
-        }
-      }
-    }
-
-    const gameStatePayload: GameStatePayload = { roomState: result.roomState };
-    io.to(roomId).emit('game_state', gameStatePayload);
-
-    const existing = roleRevealTimers.get(roomId);
-    if (existing) clearTimeout(existing);
-    roleRevealTimers.set(
-      roomId,
-      setTimeout(() => {
-        roleRevealTimers.delete(roomId);
-        const newState = transitionRoleRevealToDiscussion(roomId);
-        if (newState) {
-          io.to(roomId).emit('game_state', { roomState: newState });
-        }
-      }, ROLE_REVEAL_COUNTDOWN_MS)
-    );
+    clearLobbyCountdownTimer(roomId);
+    broadcastGameStart(roomId, result.roomState);
   });
 
   socket.on('discussion_pass', () => {
@@ -816,8 +934,7 @@ io.on('connection', (socket) => {
       return;
     }
     if (result.complete) {
-      const gameStatePayload: GameStatePayload = { roomState: result.roomState };
-      io.to(roomId).emit('game_state', gameStatePayload);
+      broadcastGameState(roomId, result.roomState);
     }
   });
 
@@ -853,6 +970,7 @@ io.on('connection', (socket) => {
     }
     if ('roomState' in result) {
       io.to(roomId).emit('room_state', { roomState: result.roomState });
+      handleLobbyCountdownAfterChange(roomId);
     } else {
       io.to(roomId).emit('game_state', { roomState: result.gameState });
     }
@@ -864,35 +982,8 @@ io.on('connection', (socket) => {
       emitError(socket, 'not_in_room', 'Vous n\'êtes dans aucune room');
       return;
     }
-    const nextRoundSockets = io.sockets.adapter.rooms.get(roomId);
-    const socketIdsInRoom = nextRoundSockets ? [...nextRoundSockets] : [];
-    const result = startNextRound(roomId, socket.id, socketIdsInRoom);
-    if (!result.ok) {
-      emitError(socket, result.code, result.message);
-      return;
-    }
-    if (nextRoundSockets) {
-      for (const sid of nextRoundSockets) {
-        const view = getPrivateView(roomId, sid);
-        if (view) {
-          const payload: YourRolePayload = { word: view.word, playerId: view.playerId };
-          io.to(sid).emit('your_role', payload);
-        }
-      }
-    }
-    io.to(roomId).emit('game_state', { roomState: result.roomState });
-    const existing = roleRevealTimers.get(roomId);
-    if (existing) clearTimeout(existing);
-    roleRevealTimers.set(
-      roomId,
-      setTimeout(() => {
-        roleRevealTimers.delete(roomId);
-        const newState = transitionRoleRevealToDiscussion(roomId);
-        if (newState) {
-          io.to(roomId).emit('game_state', { roomState: newState });
-        }
-      }, ROLE_REVEAL_COUNTDOWN_MS)
-    );
+    clearEndIntermissionTimer(roomId);
+    triggerAutoNextRound(roomId);
   });
 
   socket.on('mr_white_guess', (payload: unknown) => {
@@ -915,29 +1006,19 @@ io.on('connection', (socket) => {
       emitError(socket, result.code, result.message);
       return;
     }
-    const gameStatePayload: GameStatePayload = { roomState: result.roomState };
-    io.to(roomId).emit('game_state', gameStatePayload);
+    broadcastGameState(roomId, result.roomState);
   });
 
   socket.on('leave_room', () => {
     const result = leaveRoom(socket.id);
     if (!result) return;
 
-    if (result.action === 'closed') {
-      roleRevealTimers.delete(result.roomId);
-      const roomClosedPayload: RoomClosedPayload = {
-        code: 'host_left',
-        message: 'Le host a quitté la room',
-      };
-      io.to(result.roomId).emit('room_closed', roomClosedPayload);
-      return;
-    }
-
     if (result.action === 'updated') {
       io.to(result.roomId).emit('room_state', { roomState: result.roomState });
+      handleLobbyCountdownAfterChange(result.roomId);
     }
     if (result.action === 'game_state') {
-      io.to(result.roomId).emit('game_state', { roomState: result.roomState });
+      broadcastGameState(result.roomId, result.roomState);
     }
     // action === 'empty' : rien à broadcaster, la room est supprimée
   });
@@ -957,21 +1038,12 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (result.action === 'closed') {
-      roleRevealTimers.delete(result.roomId);
-      const roomClosedPayload: RoomClosedPayload = {
-        code: 'host_left',
-        message: 'Le host a quitté la room',
-      };
-      io.to(result.roomId).emit('room_closed', roomClosedPayload);
-      return;
-    }
-
     if (result.action === 'updated') {
       io.to(result.roomId).emit('room_state', { roomState: result.roomState });
+      handleLobbyCountdownAfterChange(result.roomId);
     }
     if (result.action === 'game_state') {
-      io.to(result.roomId).emit('game_state', { roomState: result.roomState });
+      broadcastGameState(result.roomId, result.roomState);
     }
   });
 });

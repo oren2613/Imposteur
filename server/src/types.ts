@@ -26,6 +26,7 @@ export interface LobbyMemberPublic {
   socketId: string;
   name: string;
   isHost: boolean;
+  ready: boolean;
   gamesPlayed: number;
   wins: number;
   avatarUrl?: string | null;
@@ -38,6 +39,8 @@ export interface RoomLobbyState {
   config: GameConfig;
   members: LobbyMemberPublic[];
   hostSocketId: string;
+  /** Début auto de partie (epoch ms), null si room pas pleine ou pas en attente */
+  countdownEndsAt: number | null;
 }
 
 // --- Types partie (sprint start_game + role_reveal_ack)
@@ -93,6 +96,10 @@ export interface RoomGameState {
   discussionStartedAt?: number;
   /** Durée max discussion en ms (120 000) */
   discussionDurationMs?: number;
+  /** Fin de partie : décompte avant la manche suivante (epoch ms) */
+  nextRoundCountdownEndsAt?: number | null;
+  /** Fin de partie : socketIds des joueurs prêts pour la manche suivante */
+  nextRoundReadySocketIds?: string[];
 }
 
 /** Gagnant (pour typage, pas utilisé dans ce sprint) */
@@ -124,6 +131,11 @@ export interface ReconnectToRoomPayload {
 /** Mise à jour de la config par le host (entre deux manches ou en lobby) */
 export interface UpdateRoomConfigPayload {
   config: GameConfig;
+}
+
+/** Marquer prêt / pas prêt (lobby plein ou fin de manche) */
+export interface LobbyReadyPayload {
+  ready: boolean;
 }
 
 /** Vote (client → serveur) */

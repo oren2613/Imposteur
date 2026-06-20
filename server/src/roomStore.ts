@@ -55,12 +55,22 @@ interface Room {
   turnDurationMs?: number;
   /** Début de la phase discussion (epoch ms) pour plafond 2 min */
   discussionStartedAt?: number;
+  /** Lobby : décompte auto avant le début (epoch ms) */
+  countdownEndsAt?: number | null;
+  /** Lobby : joueurs ayant cliqué « Prêt » */
+  readySocketIds?: Set<string>;
+  /** Fin de manche : décompte avant la prochaine */
+  nextRoundCountdownEndsAt?: number | null;
+  /** Fin de manche : joueurs prêts */
+  nextRoundReadySocketIds?: Set<string>;
 }
 
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 12;
 /** Mr. White ne peut être activé qu'à partir de 4 joueurs */
 const MIN_PLAYERS_FOR_MR_WHITE = 4;
+/** Délai avant le début auto quand la room est pleine */
+export const LOBBY_COUNTDOWN_MS = 10_000;
 const ROOM_ID_LENGTH = 6;
 const NAME_MIN_LENGTH = 1;
 const NAME_MAX_LENGTH = 30;
@@ -133,9 +143,18 @@ function nameTakenInRoom(room: Room, playerName: string): boolean {
 
 function toLobbyState(room: Room): RoomLobbyState {
   const statsMap = room.stats ?? new Map<string, PlayerStats>();
+  const readySet = room.readySocketIds ?? new Set<string>();
   const members: LobbyMemberPublic[] = room.members.map((m) => {
     const s = statsMap.get(m.sessionId ?? '') ?? { gamesPlayed: 0, wins: 0 };
-    return { socketId: m.socketId, name: m.name, isHost: m.isHost, gamesPlayed: s.gamesPlayed, wins: s.wins, avatarUrl: m.avatarUrl ?? null };
+    return {
+      socketId: m.socketId,
+      name: m.name,
+      isHost: m.isHost,
+      ready: readySet.has(m.socketId),
+      gamesPlayed: s.gamesPlayed,
+      wins: s.wins,
+      avatarUrl: m.avatarUrl ?? null,
+    };
   });
   return {
     status: 'lobby',
@@ -143,6 +162,7 @@ function toLobbyState(room: Room): RoomLobbyState {
     config: room.config,
     members,
     hostSocketId: room.hostSocketId,
+    countdownEndsAt: room.countdownEndsAt ?? null,
   };
 }
 
@@ -182,7 +202,133 @@ function toGameState(room: Room): RoomGameState {
     state.discussionStartedAt = room.discussionStartedAt;
     state.discussionDurationMs = DISCUSSION_MAX_DURATION_MS;
   }
+  if (phase === 'end') {
+    state.nextRoundCountdownEndsAt = room.nextRoundCountdownEndsAt ?? null;
+    state.nextRoundReadySocketIds = room.nextRoundReadySocketIds
+      ? [...room.nextRoundReadySocketIds]
+      : [];
+  }
   return state;
+}
+
+function clearLobbyCountdownState(room: Room): void {
+  room.countdownEndsAt = null;
+  room.readySocketIds?.clear();
+}
+
+function clearEndIntermissionState(room: Room): void {
+  room.nextRoundCountdownEndsAt = null;
+  room.nextRoundReadySocketIds?.clear();
+}
+
+function ensureReadySet(room: Room): Set<string> {
+  if (!room.readySocketIds) room.readySocketIds = new Set();
+  return room.readySocketIds;
+}
+
+function ensureNextRoundReadySet(room: Room): Set<string> {
+  if (!room.nextRoundReadySocketIds) room.nextRoundReadySocketIds = new Set();
+  return room.nextRoundReadySocketIds;
+}
+
+function isLobbyFull(room: Room): boolean {
+  return room.status === 'lobby' && room.members.length === room.config.playerCount;
+}
+
+function allLobbyMembersReady(room: Room): boolean {
+  if (!isLobbyFull(room)) return false;
+  const ready = room.readySocketIds ?? new Set<string>();
+  return room.members.every((m) => ready.has(m.socketId));
+}
+
+function allConnectedMembersReadyForNextRound(room: Room, socketIdsInRoom: string[]): boolean {
+  if (room.status !== 'playing' || room.phase !== 'end') return false;
+  const connected = room.members.filter((m) => m.socketId !== '' && socketIdsInRoom.includes(m.socketId));
+  if (connected.length === 0) return false;
+  const ready = room.nextRoundReadySocketIds ?? new Set<string>();
+  return connected.every((m) => ready.has(m.socketId));
+}
+
+function enterEndPhase(room: Room, winner: Winner): RoomGameState {
+  room.phase = 'end';
+  room.winner = winner;
+  room.nextRoundCountdownEndsAt = Date.now() + LOBBY_COUNTDOWN_MS;
+  room.nextRoundReadySocketIds = new Set();
+  return toGameState(room);
+}
+
+export type LobbyCountdownChange = 'started' | 'cancelled' | 'unchanged';
+
+/** Démarre ou annule le décompte lobby selon le remplissage de la room. */
+export function syncLobbyCountdown(roomId: string): { change: LobbyCountdownChange; roomState: RoomLobbyState | null } {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'lobby') {
+    return { change: 'unchanged', roomState: null };
+  }
+  if (isLobbyFull(room)) {
+    if (!room.countdownEndsAt) {
+      room.countdownEndsAt = Date.now() + LOBBY_COUNTDOWN_MS;
+      ensureReadySet(room).clear();
+      return { change: 'started', roomState: toLobbyState(room) };
+    }
+    return { change: 'unchanged', roomState: toLobbyState(room) };
+  }
+  if (room.countdownEndsAt) {
+    clearLobbyCountdownState(room);
+    return { change: 'cancelled', roomState: toLobbyState(room) };
+  }
+  return { change: 'unchanged', roomState: toLobbyState(room) };
+}
+
+export function getLobbyState(roomId: string): RoomLobbyState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'lobby') return null;
+  return toLobbyState(room);
+}
+
+export type SetLobbyReadyResult =
+  | { ok: true; roomState: RoomLobbyState; allReady: boolean }
+  | { ok: true; gameState: RoomGameState; allReady: boolean }
+  | { ok: false; code: string; message: string };
+
+export function setLobbyReady(
+  roomId: string,
+  socketId: string,
+  ready: boolean,
+  socketIdsInRoom: string[]
+): SetLobbyReadyResult {
+  const room = rooms.get(roomId);
+  if (!room) {
+    return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
+  }
+
+  if (room.status === 'lobby') {
+    if (!isLobbyFull(room)) {
+      return { ok: false, code: 'room_not_full', message: 'La room n\'est pas encore pleine' };
+    }
+    if (!room.members.some((m) => m.socketId === socketId)) {
+      return { ok: false, code: 'not_in_room', message: 'Joueur introuvable' };
+    }
+    const readySet = ensureReadySet(room);
+    if (ready) readySet.add(socketId);
+    else readySet.delete(socketId);
+    const allReady = allLobbyMembersReady(room);
+    return { ok: true, roomState: toLobbyState(room), allReady };
+  }
+
+  if (room.status === 'playing' && room.phase === 'end') {
+    const member = room.members.find((m) => m.socketId === socketId);
+    if (!member || !socketIdsInRoom.includes(socketId)) {
+      return { ok: false, code: 'not_in_room', message: 'Joueur introuvable' };
+    }
+    const readySet = ensureNextRoundReadySet(room);
+    if (ready) readySet.add(socketId);
+    else readySet.delete(socketId);
+    const allReady = allConnectedMembersReadyForNextRound(room, socketIdsInRoom);
+    return { ok: true, gameState: toGameState(room), allReady };
+  }
+
+  return { ok: false, code: 'wrong_phase', message: 'Prêt indisponible dans cette phase' };
 }
 
 export type CreateRoomResult =
@@ -275,7 +421,7 @@ export function joinRoom(
 
 export type LeaveRoomResult =
   | { action: 'closed'; roomId: string; wasHost: true; socketIdsInRoom: string[] }
-  | { action: 'updated'; roomId: string; wasHost: false; roomState: RoomLobbyState }
+  | { action: 'updated'; roomId: string; wasHost: boolean; roomState: RoomLobbyState }
   | { action: 'empty'; roomId: string; wasHost: boolean }
   | { action: 'game_state'; roomId: string; roomState: RoomGameState }
   | null;
@@ -307,8 +453,7 @@ export function leaveRoom(socketId: string): LeaveRoomResult {
     player.eliminated = true;
     const victory = checkVictoryAfterElimination(room.gamePlayers);
     if (victory) {
-      room.phase = 'end';
-      room.winner = victory;
+      return { action: 'game_state', roomId, roomState: enterEndPhase(room, victory) };
     }
     return { action: 'game_state', roomId, roomState: toGameState(room) };
   }
@@ -323,24 +468,23 @@ export function leaveRoom(socketId: string): LeaveRoomResult {
   room.members.splice(index, 1);
   socketToRoomId.delete(socketId);
 
-  if (wasHost) {
-    const socketIdsInRoom = room.members.map((m) => m.socketId);
-    rooms.delete(roomId);
-    for (const sid of socketIdsInRoom) {
-      socketToRoomId.delete(sid);
-    }
-    return { action: 'closed', roomId, wasHost: true, socketIdsInRoom };
-  }
-
   if (room.members.length === 0) {
     rooms.delete(roomId);
-    return { action: 'empty', roomId, wasHost: false };
+    return { action: 'empty', roomId, wasHost };
   }
 
+  if (wasHost) {
+    room.hostSocketId = room.members[0].socketId;
+    room.members.forEach((m, i) => {
+      m.isHost = i === 0;
+    });
+  }
+
+  clearLobbyCountdownState(room);
   return {
     action: 'updated',
     roomId,
-    wasHost: false,
+    wasHost,
     roomState: toLobbyState(room),
   };
 }
@@ -450,16 +594,13 @@ export type StartGameResult =
   | { ok: true; roomState: RoomGameState }
   | { ok: false; code: string; message: string };
 
-export function startGame(roomId: string, socketId: string): StartGameResult {
+export function startGameInternal(roomId: string): StartGameResult {
   const room = rooms.get(roomId);
   if (!room) {
     return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
   }
   if (room.status !== 'lobby') {
     return { ok: false, code: 'wrong_phase', message: 'La partie a déjà commencé' };
-  }
-  if (room.hostSocketId !== socketId) {
-    return { ok: false, code: 'not_host', message: 'Seul le host peut lancer la partie' };
   }
   if (room.members.length !== room.config.playerCount) {
     return {
@@ -469,6 +610,7 @@ export function startGame(roomId: string, socketId: string): StartGameResult {
     };
   }
 
+  clearLobbyCountdownState(room);
   const { wordPair, players: gamePlayers } = startGameLogic(room.members, room.config);
   room.status = 'playing';
   room.phase = 'roleReveal';
@@ -477,6 +619,11 @@ export function startGame(roomId: string, socketId: string): StartGameResult {
   room.roleRevealAcked = new Set();
 
   return { ok: true, roomState: toGameState(room) };
+}
+
+/** @deprecated Utiliser startGameInternal — conservé pour compatibilité */
+export function startGame(roomId: string, _socketId: string): StartGameResult {
+  return startGameInternal(roomId);
 }
 
 export function getGameState(roomId: string): RoomGameState | null {
@@ -673,18 +820,14 @@ export function vote(
 
   const victory = checkVictoryAfterElimination(room.gamePlayers);
   if (victory) {
-    room.phase = 'end';
-    room.winner = victory;
-    return { ok: true, complete: true, roomState: toGameState(room) };
+    return { ok: true, complete: true, roomState: enterEndPhase(room, victory) };
   }
   if (eliminated.role === 'imposteur') {
     if (shouldContinueAfterImpostorEliminated(room.gamePlayers, room.config.mrWhiteEnabled)) {
       room.phase = 'eliminatedReveal';
       return { ok: true, complete: true, roomState: toGameState(room) };
     }
-    room.phase = 'end';
-    room.winner = 'citoyens';
-    return { ok: true, complete: true, roomState: toGameState(room) };
+    return { ok: true, complete: true, roomState: enterEndPhase(room, 'citoyens') };
   }
   if (eliminated.role === 'mrWhite') {
     room.phase = 'mrWhiteGuess';
@@ -886,9 +1029,7 @@ export function mrWhiteGuess(roomId: string, socketId: string, guess: string): M
   const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
   const normalizedCitizen = room.wordPair.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
   const correct = normalizedGuess === normalizedCitizen;
-  room.phase = 'end';
-  room.winner = correct ? 'mrWhite' : 'citoyens';
-  return { ok: true, roomState: toGameState(room) };
+  return { ok: true, roomState: enterEndPhase(room, correct ? 'mrWhite' : 'citoyens') };
 }
 
 // --- update_room_config, start_next_round (room persistante, manches multiples)
@@ -979,9 +1120,8 @@ export type StartNextRoundResult =
  * Host uniquement, uniquement en phase 'end'.
  * socketIdsInRoom : ensemble des socketId actuellement dans la room (pour exclure les déconnectés).
  */
-export function startNextRound(
+export function startNextRoundInternal(
   roomId: string,
-  socketId: string,
   socketIdsInRoom: string[]
 ): StartNextRoundResult {
   const room = rooms.get(roomId);
@@ -991,9 +1131,8 @@ export function startNextRound(
   if (room.status !== 'playing' || room.phase !== 'end') {
     return { ok: false, code: 'wrong_phase', message: 'Une manche est déjà en cours ou la partie n\'est pas terminée' };
   }
-  if (room.hostSocketId !== socketId) {
-    return { ok: false, code: 'not_host', message: 'Seul le host peut lancer une nouvelle manche' };
-  }
+
+  clearEndIntermissionState(room);
 
   const connectedSet = new Set(socketIdsInRoom);
   room.members = room.members.filter((m) => m.socketId !== '' && connectedSet.has(m.socketId));
@@ -1002,8 +1141,11 @@ export function startNextRound(
     return { ok: false, code: 'no_players', message: 'Aucun joueur connecté dans la room' };
   }
 
-  const hostStillPresent = room.members.some((m) => m.socketId === room.hostSocketId);
-  if (!hostStillPresent) {
+  if (room.members.length < MIN_PLAYERS) {
+    return { ok: false, code: 'not_enough_players', message: `Il faut au moins ${MIN_PLAYERS} joueurs` };
+  }
+
+  if (!room.members.some((m) => m.socketId === room.hostSocketId)) {
     room.hostSocketId = room.members[0].socketId;
     room.members.forEach((m, i) => {
       m.isHost = i === 0;
@@ -1029,4 +1171,12 @@ export function startNextRound(
   room.wordPair = wordPair;
   room.roleRevealAcked = new Set();
   return { ok: true, roomState: toGameState(room) };
+}
+
+export function startNextRound(
+  roomId: string,
+  _socketId: string,
+  socketIdsInRoom: string[]
+): StartNextRoundResult {
+  return startNextRoundInternal(roomId, socketIdsInRoom);
 }

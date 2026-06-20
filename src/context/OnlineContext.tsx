@@ -91,8 +91,10 @@ interface OnlineContextValue {
   myPlayerId: string | null;
   /** Code de la room (pour partage) */
   roomId: string | null;
-  /** True si ce client est le host */
+  /** True si ce client est le créateur de la room (config uniquement) */
   isHost: boolean;
+  /** Pseudo local dans la room */
+  localPlayerName: string | null;
   /** Message d'erreur à afficher */
   error: string | null;
   /** True pendant une tentative de reconnexion au chargement */
@@ -121,8 +123,8 @@ interface OnlineContextValue {
   clearInviteLinkRoomCode: () => void;
   /** Quitter le lobby (déconnexion socket + retour accueil) */
   leaveRoom: () => void;
-  /** Lancer la partie (host uniquement, émet start_game) */
-  startGame: () => void;
+  /** Marquer prêt / pas prêt (lobby plein ou fin de manche) */
+  setLobbyReady: (ready: boolean) => void;
   /** Passer mon tour en discussion (émet discussion_pass) */
   discussionPass: () => void;
   /** Voter pour éliminer un joueur (émet vote) */
@@ -131,10 +133,8 @@ interface OnlineContextValue {
   continueAfterEliminated: () => void;
   /** Mr. White propose le mot des Citoyens (émet mr_white_guess) */
   submitMrWhiteGuess: (guess: string) => void;
-  /** Mettre à jour la config de la room (host, émet update_room_config) */
+  /** Mettre à jour la config de la room (créateur, émet update_room_config) */
   updateRoomConfig: (config: OnlineGameConfig) => void;
-  /** Lancer une nouvelle manche (host, émet start_next_round) */
-  startNextRound: () => void;
   /** Effacer l'erreur affichée */
   clearError: () => void;
   /** Invitation en cours (reçu via game_invite) */
@@ -173,6 +173,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [localPlayerName, setLocalPlayerName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [pendingInvite, setPendingInvite] = useState<{ roomId: string; hostName: string; hostAvatarUrl?: string | null } | null>(null);
@@ -419,6 +420,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const session = getStoredSession();
     if (!session?.roomId || !session.playerSessionId || !session.playerName) return;
+    setLocalPlayerName(session.playerName);
     reconnectingRef.current = true;
     setIsReconnecting(true);
     setError(null);
@@ -452,13 +454,15 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const createRoom = useCallback(
     (playerName: string) => {
       setError(null);
+      const trimmed = playerName.trim();
+      setLocalPlayerName(trimmed);
       const playerSessionId = generateSessionId();
-      saveSession(playerSessionId, '', playerName);
+      saveSession(playerSessionId, '', trimmed);
       const socket = connect();
       const token = getToken();
       socket.emit('create_room', {
         config: DEFAULT_CONFIG,
-        playerName,
+        playerName: trimmed,
         clientSessionId: playerSessionId,
         ...(token && { authToken: token }),
       });
@@ -469,14 +473,16 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const joinRoom = useCallback(
     (code: string, playerName: string) => {
       setError(null);
+      const trimmed = playerName.trim();
+      setLocalPlayerName(trimmed);
       const roomIdNorm = code.trim().toUpperCase();
       const playerSessionId = generateSessionId();
-      saveSession(playerSessionId, roomIdNorm, playerName);
+      saveSession(playerSessionId, roomIdNorm, trimmed);
       const socket = connect();
       const token = getToken();
       socket.emit('join_room', {
         roomId: roomIdNorm,
-        playerName,
+        playerName: trimmed,
         clientSessionId: playerSessionId,
         ...(token && { authToken: token }),
       });
@@ -487,12 +493,14 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const joinMatchmaking = useCallback(
     (playerName: string) => {
       setError(null);
+      const trimmed = playerName.trim();
+      setLocalPlayerName(trimmed);
       const playerSessionId = generateSessionId();
-      saveSession(playerSessionId, '', playerName);
+      saveSession(playerSessionId, '', trimmed);
       const socket = connect();
       const token = getToken();
       const payload = {
-        playerName,
+        playerName: trimmed,
         clientSessionId: playerSessionId,
         ...(token && { authToken: token }),
       };
@@ -526,10 +534,10 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     setPhase('home');
   }, [disconnect, setPhase]);
 
-  const startGame = useCallback(() => {
+  const setLobbyReady = useCallback((ready: boolean) => {
     if (!socketRef.current) return;
     setError(null);
-    socketRef.current.emit('start_game');
+    socketRef.current.emit('lobby_ready', { ready });
   }, []);
 
   const discussionPass = useCallback(() => {
@@ -560,12 +568,6 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     if (!socketRef.current) return;
     setError(null);
     socketRef.current.emit('update_room_config', { config });
-  }, []);
-
-  const startNextRound = useCallback(() => {
-    if (!socketRef.current) return;
-    setError(null);
-    socketRef.current.emit('start_next_round');
   }, []);
 
   const clearError = useCallback(() => {
@@ -641,6 +643,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       myPlayerId,
       roomId,
       isHost,
+      localPlayerName,
       error,
       isReconnecting,
       myStats,
@@ -656,13 +659,12 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       inviteLinkRoomCode,
       clearInviteLinkRoomCode,
       leaveRoom,
-      startGame,
+      setLobbyReady,
       discussionPass,
       vote,
       continueAfterEliminated,
       submitMrWhiteGuess,
       updateRoomConfig,
-      startNextRound,
       clearError,
       pendingInvite,
       clearPendingInvite,
@@ -684,6 +686,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       myPlayerId,
       roomId,
       isHost,
+      localPlayerName,
       error,
       isReconnecting,
       myStats,
@@ -702,13 +705,12 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       leaveMatchmaking,
       clearInviteLinkRoomCode,
       leaveRoom,
-      startGame,
+      setLobbyReady,
       discussionPass,
       vote,
       continueAfterEliminated,
       submitMrWhiteGuess,
       updateRoomConfig,
-      startNextRound,
       clearError,
       clearPendingInvite,
       clearPendingFriendRequest,

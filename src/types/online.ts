@@ -15,6 +15,7 @@ export interface RoomMember {
   socketId: string;
   name: string;
   isHost: boolean;
+  ready: boolean;
   gamesPlayed?: number;
   wins?: number;
   avatarUrl?: string | null;
@@ -27,6 +28,7 @@ export interface RoomLobbyState {
   config: OnlineGameConfig;
   members: RoomMember[];
   hostSocketId: string;
+  countdownEndsAt: number | null;
 }
 
 // --- Partie online (game_state, your_role)
@@ -65,6 +67,10 @@ export interface RoomGameState {
   discussionStartedAt?: number;
   /** Durée max discussion en ms (120 000) */
   discussionDurationMs?: number;
+  /** Fin de partie : décompte avant la manche suivante (epoch ms) */
+  nextRoundCountdownEndsAt?: number | null;
+  /** Fin de partie : joueurs prêts pour la manche suivante */
+  nextRoundReadySocketIds?: string[];
 }
 
 /** Payload your_role (mot + id du joueur) */
