@@ -63,6 +63,7 @@ import {
   acceptFriendRequest,
   refuseFriendRequest,
   updateUserAvatar,
+  areFriends,
   type UserRow,
 } from './db.js';
 import { toPublicUser } from './user.js';
@@ -441,19 +442,25 @@ io.on('connection', (socket) => {
       emitError(socket, 'invalid_payload', 'friendUserId requis');
       return;
     }
-    const friendSocketId = userIdToSocketId.get(friendUserId);
-    if (!friendSocketId) {
-      socket.emit('invite_sent', { success: false, message: 'Ami hors ligne' });
-      return;
-    }
-    const hostName = getRoomHostName(roomId) ?? 'Un ami';
-    void findUserById(hostUserId).then((hostUser) => {
-      io.to(friendSocketId).emit('game_invite', {
-        roomId,
-        hostName,
-        hostAvatarUrl: hostUser?.avatar_url ?? null,
+    void areFriends(hostUserId, friendUserId).then((friends) => {
+      if (!friends) {
+        emitError(socket, 'not_friends', 'Cet utilisateur n\'est pas dans vos amis');
+        return;
+      }
+      const friendSocketId = userIdToSocketId.get(friendUserId);
+      if (!friendSocketId) {
+        socket.emit('invite_sent', { success: false, message: 'Ami hors ligne' });
+        return;
+      }
+      const hostName = getRoomHostName(roomId) ?? 'Un ami';
+      void findUserById(hostUserId).then((hostUser) => {
+        io.to(friendSocketId).emit('game_invite', {
+          roomId,
+          hostName,
+          hostAvatarUrl: hostUser?.avatar_url ?? null,
+        });
+        socket.emit('invite_sent', { success: true });
       });
-      socket.emit('invite_sent', { success: true });
     });
   });
 
@@ -678,7 +685,7 @@ io.on('connection', (socket) => {
       emitError(socket, 'not_in_room', 'Vous n\'êtes dans aucune room');
       return;
     }
-    const result = continueAfterEliminated(roomId);
+    const result = continueAfterEliminated(roomId, socket.id);
     if (!result.ok) {
       emitError(socket, result.code, result.message);
       return;

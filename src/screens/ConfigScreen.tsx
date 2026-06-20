@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
+import { getMaxImpostors } from '../utils/gameLogic';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 
@@ -26,10 +27,10 @@ export function ConfigScreen() {
     const newNames = [...config.playerNames];
     while (newNames.length < count) newNames.push('');
     const slice = newNames.slice(0, count);
+    const nextConfig = { ...config, playerCount: count, playerNames: slice };
     setConfig({
-      ...config,
-      playerCount: count,
-      playerNames: slice,
+      ...nextConfig,
+      impostorCount: Math.min(nextConfig.impostorCount, getMaxImpostors(nextConfig)),
     });
   };
 
@@ -56,7 +57,7 @@ export function ConfigScreen() {
     startNewGame();
   };
 
-  const maxImpostors = Math.max(1, config.playerCount - (config.mrWhiteEnabled ? 2 : 1));
+  const maxImpostors = getMaxImpostors(config);
   const impostorCount = Math.min(config.impostorCount, maxImpostors);
 
   return (
@@ -156,12 +157,14 @@ export function ConfigScreen() {
             type="button"
             role="switch"
             aria-checked={config.mrWhiteEnabled}
-            onClick={() =>
+            onClick={() => {
+              const mrWhiteEnabled = !config.mrWhiteEnabled;
+              const nextConfig = { ...config, mrWhiteEnabled };
               setConfig({
-                ...config,
-                mrWhiteEnabled: !config.mrWhiteEnabled,
-              })
-            }
+                ...nextConfig,
+                impostorCount: Math.min(nextConfig.impostorCount, getMaxImpostors(nextConfig)),
+              });
+            }}
             className={`relative w-14 h-8 rounded-full transition-colors ${
               config.mrWhiteEnabled
                 ? 'bg-violet-600'

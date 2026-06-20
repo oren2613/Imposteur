@@ -1,12 +1,17 @@
 /**
  * Logique de tirage des rôles et des mots (côté serveur).
- * Utilisé au start_game pour générer les joueurs de partie.
  */
 
 import type { GameConfig, WordPair } from './types.js';
-import { getRandomWordPair } from './wordPairs.js';
+import {
+  buildRoles,
+  checkVictoryAfterElimination,
+} from '../../shared/gameLogic.js';
+import type { Role } from '../../shared/types.js';
+import { getRandomWordPair } from '../../shared/wordPairs.js';
 
-type Role = 'citoyen' | 'imposteur' | 'mrWhite';
+export type { VictoryResult } from '../../shared/gameLogic.js';
+export { checkVictoryAfterElimination } from '../../shared/gameLogic.js';
 
 /** Joueur interne (avec rôle et mot, jamais exposé tel quel au client) */
 export interface GamePlayerInternal {
@@ -28,25 +33,6 @@ interface Member {
   name: string;
   sessionId?: string;
   avatarUrl?: string | null;
-}
-
-function shuffle<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-function buildRoles(config: GameConfig): Role[] {
-  const { playerCount, impostorCount, mrWhiteEnabled } = config;
-  const roles: Role[] = [];
-  for (let i = 0; i < impostorCount; i++) roles.push('imposteur');
-  if (mrWhiteEnabled) roles.push('mrWhite');
-  const citizenCount = playerCount - roles.length;
-  for (let i = 0; i < citizenCount; i++) roles.push('citoyen');
-  return shuffle(roles);
 }
 
 /**
@@ -87,25 +73,4 @@ export function startGameLogic(
   const wordPair = getRandomWordPair();
   const players = createGamePlayers(members, config, wordPair);
   return { wordPair, players };
-}
-
-export type VictoryResult = 'citoyens' | 'imposteur' | 'mrWhite' | null;
-
-/**
- * Vérifie les conditions de victoire après une élimination.
- * - 2 restants dont Mr. White → Mr. White gagne
- * - 2 restants : 1 civil + 1 imposteur → l'imposteur gagne
- * - Sinon null (partie continue)
- */
-export function checkVictoryAfterElimination(
-  players: GamePlayerInternal[]
-): VictoryResult {
-  const alive = players.filter((p) => !p.eliminated);
-  if (alive.length !== 2) return null;
-  const roles = alive.map((p) => p.role);
-  if (roles.includes('mrWhite')) return 'mrWhite';
-  const hasCitizen = roles.includes('citoyen');
-  const hasImpostor = roles.includes('imposteur');
-  if (hasCitizen && hasImpostor) return 'imposteur';
-  return null;
 }

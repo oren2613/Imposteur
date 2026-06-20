@@ -6,8 +6,17 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { findUserByUsername, findUserById, type UserRow } from './db.js';
 
-const JWT_SECRET = process.env.JWT_SECRET ?? 'imposteur-dev-secret-change-in-production';
+const JWT_SECRET = resolveJwtSecret();
 const SALT_ROUNDS = 10;
+
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET must be set in production');
+  }
+  return 'imposteur-dev-secret-change-in-production';
+}
 
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, SALT_ROUNDS);

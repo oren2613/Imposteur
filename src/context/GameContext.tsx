@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { GameState, GamePhase, HistoryEntry } from '../types/game';
-import { startGame, isMrWhiteGuessCorrect, checkVictoryAfterElimination } from '../utils/gameLogic';
+import { startGame, isMrWhiteGuessCorrect, checkVictoryAfterElimination, shouldContinueAfterImpostorEliminated } from '../utils/gameLogic';
 
 const HISTORY_KEY = 'imposteur-history';
 const MAX_HISTORY = 50;
@@ -98,6 +98,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const appendHistoryEntry = useCallback((entry: Omit<HistoryEntry, 'id' | 'date'>) => {
+    setHistory((h) => {
+      const newEntry: HistoryEntry = {
+        ...entry,
+        id: crypto.randomUUID(),
+        date: new Date().toISOString(),
+      };
+      const next = [...h, newEntry];
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
   const eliminatePlayer = useCallback((playerId: string) => {
     setState((s) => {
       const players = s.players.map((p) =>
@@ -106,21 +119,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
       const eliminated = s.players.find((p) => p.id === playerId);
       if (!eliminated) return s;
 
+      const historyBase = {
+        playerCount: s.players.length,
+        wordPair: s.wordPair!,
+      };
+
       // Vérification centralisée des conditions de victoire (2 joueurs restants)
       const victory = checkVictoryAfterElimination(players);
       if (victory === 'mrWhite') {
-        const newHistory = [
-          ...history,
-          {
-            id: crypto.randomUUID(),
-            date: new Date().toISOString(),
-            winner: 'mrWhite' as const,
-            playerCount: s.players.length,
-            wordPair: s.wordPair!,
-          },
-        ];
-        setHistory(newHistory);
-        saveHistory(newHistory);
+        appendHistoryEntry({ ...historyBase, winner: 'mrWhite' });
         return {
           ...s,
           players,
@@ -130,18 +137,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         };
       }
       if (victory === 'imposteur') {
-        const newHistory = [
-          ...history,
-          {
-            id: crypto.randomUUID(),
-            date: new Date().toISOString(),
-            winner: 'imposteur' as const,
-            playerCount: s.players.length,
-            wordPair: s.wordPair!,
-          },
-        ];
-        setHistory(newHistory);
-        saveHistory(newHistory);
+        appendHistoryEntry({ ...historyBase, winner: 'imposteur' });
         return {
           ...s,
           players,
@@ -152,18 +148,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
 
       if (eliminated.role === 'imposteur') {
-        const newHistory = [
-          ...history,
-          {
-            id: crypto.randomUUID(),
-            date: new Date().toISOString(),
-            winner: 'citoyens' as const,
-            playerCount: s.players.length,
-            wordPair: s.wordPair!,
-          },
-        ];
-        setHistory(newHistory);
-        saveHistory(newHistory);
+        if (shouldContinueAfterImpostorEliminated(players, s.config.mrWhiteEnabled)) {
+          return {
+            ...s,
+            players,
+            eliminatedPlayerId: playerId,
+            phase: 'eliminatedReveal',
+          };
+        }
+        appendHistoryEntry({ ...historyBase, winner: 'citoyens' });
         return {
           ...s,
           players,
@@ -190,7 +183,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         phase: 'eliminatedReveal',
       };
     });
-  }, [history]);
+  }, [appendHistoryEntry]);
 
   const continueAfterCitizenEliminated = useCallback(() => {
     setState((s) => ({ ...s, phase: 'discussion', eliminatedPlayerId: null }));
@@ -202,16 +195,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       if (!s.wordPair) return s;
       correct = isMrWhiteGuessCorrect(guess, s.wordPair.motCitoyens);
       const winner: 'citoyens' | 'mrWhite' = correct ? 'mrWhite' : 'citoyens';
-      const newEntry: HistoryEntry = {
-        id: crypto.randomUUID(),
-        date: new Date().toISOString(),
+      appendHistoryEntry({
         winner,
         playerCount: s.players.length,
         wordPair: s.wordPair,
-      };
-      const newHistory = [...history, newEntry];
-      setHistory(newHistory);
-      saveHistory(newHistory);
+      });
       return {
         ...s,
         mrWhiteGuessCorrect: correct,
@@ -220,7 +208,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       };
     });
     return correct;
-  }, [history]);
+  }, [appendHistoryEntry]);
 
   const resetToConfig = useCallback(() => {
     setState((s) => ({
@@ -235,17 +223,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addToHistory = useCallback((entry: Omit<HistoryEntry, 'id' | 'date'>) => {
-    const newEntry: HistoryEntry = {
-      ...entry,
-      id: crypto.randomUUID(),
-      date: new Date().toISOString(),
-    };
-    setHistory((h) => {
-      const next = [...h, newEntry];
-      saveHistory(next);
-      return next;
-    });
-  }, []);
+    appendHistoryEntry(entry);
+  }, [appendHistoryEntry]);
 
   const value = useMemo<GameContextValue>(
     () => ({

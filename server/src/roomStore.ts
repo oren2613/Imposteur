@@ -17,6 +17,10 @@ import type {
 } from './types.js';
 import type { GamePlayerInternal } from './gameLogic.js';
 import { startGameLogic, checkVictoryAfterElimination } from './gameLogic.js';
+import {
+  getMaxImpostors,
+  shouldContinueAfterImpostorEliminated,
+} from '../../shared/gameLogic.js';
 
 /** Stats par sessionId (persistantes sur la room) */
 interface PlayerStats {
@@ -77,15 +81,6 @@ function generateRoomId(): string {
   return id;
 }
 
-/**
- * Nombre max d'imposteurs : impostorCount <= civilCount
- * civilCount = playerCount - impostorCount - (mrWhiteEnabled ? 1 : 0)
- * => impostorCount <= floor((playerCount - (mrWhiteEnabled ? 1 : 0)) / 2)
- */
-function getMaxImpostors(config: GameConfig): number {
-  const civilsSlot = config.playerCount - (config.mrWhiteEnabled ? 1 : 0);
-  return Math.max(1, Math.floor(civilsSlot / 2));
-}
 
 export function validateConfig(config: GameConfig): { ok: boolean; code?: string; message?: string } {
   if (
@@ -683,10 +678,7 @@ export function vote(
     return { ok: true, complete: true, roomState: toGameState(room) };
   }
   if (eliminated.role === 'imposteur') {
-    const mrWhiteStillAlive =
-      room.config.mrWhiteEnabled &&
-      room.gamePlayers.some((p) => p.role === 'mrWhite' && !p.eliminated);
-    if (mrWhiteStillAlive) {
+    if (shouldContinueAfterImpostorEliminated(room.gamePlayers, room.config.mrWhiteEnabled)) {
       room.phase = 'eliminatedReveal';
       return { ok: true, complete: true, roomState: toGameState(room) };
     }
@@ -780,13 +772,20 @@ export type ContinueAfterEliminatedResult =
   | { ok: true; roomState: RoomGameState }
   | { ok: false; code: string; message: string };
 
-export function continueAfterEliminated(roomId: string): ContinueAfterEliminatedResult {
+export function continueAfterEliminated(
+  roomId: string,
+  socketId: string
+): ContinueAfterEliminatedResult {
   const room = rooms.get(roomId);
-  if (!room || room.status !== 'playing') {
+  if (!room || room.status !== 'playing' || !room.gamePlayers) {
     return { ok: false, code: 'wrong_phase', message: 'Action non autorisée' };
   }
   if (room.phase !== 'eliminatedReveal') {
     return { ok: false, code: 'wrong_phase', message: 'Phase incorrecte' };
+  }
+  const player = room.gamePlayers.find((p) => p.socketId === socketId);
+  if (!player || player.eliminated) {
+    return { ok: false, code: 'not_a_player', message: 'Action non autorisée' };
   }
   room.phase = 'discussion';
   room.eliminatedPlayerId = null;

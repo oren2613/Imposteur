@@ -322,6 +322,24 @@ export async function removeFriend(userId: number, friendId: number): Promise<bo
   return result.changes > 0;
 }
 
+export async function areFriends(userId: number, friendId: number): Promise<boolean> {
+  const a = Math.min(userId, friendId);
+  const b = Math.max(userId, friendId);
+
+  if (usePostgres) {
+    const result = await getPgPool().query(
+      'SELECT 1 FROM friends WHERE user_id = $1 AND friend_id = $2',
+      [a, b]
+    );
+    return result.rows.length > 0;
+  }
+
+  const row = getSqliteDb()
+    .prepare('SELECT 1 FROM friends WHERE user_id = ? AND friend_id = ?')
+    .get(a, b);
+  return row != null;
+}
+
 export type CreateFriendRequestResult =
   | { ok: true; requestId: number; toUserId: number; toUsername: string }
   | { ok: false; code: 'not_found' | 'self' | 'already_friends' | 'already_requested' };

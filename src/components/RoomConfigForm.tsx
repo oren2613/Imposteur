@@ -1,15 +1,10 @@
 import type { OnlineGameConfig } from '../types/online';
+import { getMaxImpostors } from '@shared/gameLogic';
 
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 12;
 /** Mr. White ne peut être activé qu'à partir de 4 joueurs */
 const MIN_PLAYERS_FOR_MR_WHITE = 4;
-
-/** impostorCount <= civilCount => max = floor((playerCount - (mw?1:0)) / 2) */
-function getMaxImpostors(config: OnlineGameConfig): number {
-  const civilsSlot = config.playerCount - (config.mrWhiteEnabled ? 1 : 0);
-  return Math.max(1, Math.floor(civilsSlot / 2));
-}
 
 interface RoomConfigFormProps {
   config: OnlineGameConfig;
@@ -38,12 +33,10 @@ export function RoomConfigForm({
           onChange={(e) => {
             const playerCount = Number(e.target.value);
             const mrWhiteEnabled = config.mrWhiteEnabled && playerCount >= MIN_PLAYERS_FOR_MR_WHITE;
-            const newMaxImp = Math.max(1, playerCount - (mrWhiteEnabled ? 2 : 1));
+            const nextConfig = { ...config, playerCount, mrWhiteEnabled };
             onChange({
-              ...config,
-              playerCount,
-              mrWhiteEnabled,
-              impostorCount: Math.min(config.impostorCount, newMaxImp),
+              ...nextConfig,
+              impostorCount: Math.min(config.impostorCount, getMaxImpostors(nextConfig)),
             });
           }}
           disabled={disabled}
@@ -91,11 +84,10 @@ export function RoomConfigForm({
           checked={config.mrWhiteEnabled}
           onChange={(e) => {
             const mrWhiteEnabled = e.target.checked;
-            const newMaxImp = Math.max(1, config.playerCount - (mrWhiteEnabled ? 2 : 1));
+            const nextConfig = { ...config, mrWhiteEnabled };
             onChange({
-              ...config,
-              mrWhiteEnabled,
-              impostorCount: Math.min(config.impostorCount, newMaxImp),
+              ...nextConfig,
+              impostorCount: Math.min(config.impostorCount, getMaxImpostors(nextConfig)),
             });
           }}
           disabled={disabled || config.playerCount < MIN_PLAYERS_FOR_MR_WHITE}

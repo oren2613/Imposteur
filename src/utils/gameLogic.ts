@@ -1,31 +1,15 @@
-import type { Role, Player, WordPair, GameConfig } from '../types/game';
-import { getRandomWordPair } from '../data/wordPairs';
+import type { Player, WordPair, GameConfig } from '../types/game';
+import { buildRoles } from '@shared/gameLogic';
+import { getRandomWordPair } from '@shared/wordPairs';
 
-/** Mélange Fisher-Yates */
-function shuffle<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-/**
- * Génère la liste des rôles pour une configuration donnée.
- * Répartition : 1 ou N imposteurs, 0 ou 1 Mr. White, le reste Citoyens.
- */
-export function buildRoles(config: GameConfig): Role[] {
-  const { playerCount, impostorCount, mrWhiteEnabled } = config;
-  const roles: Role[] = [];
-
-  for (let i = 0; i < impostorCount; i++) roles.push('imposteur');
-  if (mrWhiteEnabled) roles.push('mrWhite');
-  const citizenCount = playerCount - roles.length;
-  for (let i = 0; i < citizenCount; i++) roles.push('citoyen');
-
-  return shuffle(roles);
-}
+export {
+  buildRoles,
+  checkVictoryAfterElimination,
+  isMrWhiteGuessCorrect,
+  getMaxImpostors,
+  shouldContinueAfterImpostorEliminated,
+} from '@shared/gameLogic';
+export type { VictoryResult } from '@shared/gameLogic';
 
 /**
  * Crée les joueurs avec rôles et mots assignés.
@@ -56,30 +40,4 @@ export function startGame(config: GameConfig): { wordPair: WordPair; players: Pl
   return { wordPair, players };
 }
 
-/**
- * Compare la proposition de Mr. White au mot des Citoyens (insensible à la casse et aux espaces).
- */
-export function isMrWhiteGuessCorrect(guess: string, motCitoyens: string): boolean {
-  const n = guess.trim().toLowerCase();
-  const m = motCitoyens.trim().toLowerCase();
-  return n === m;
-}
-
-export type VictoryResult = 'citoyens' | 'imposteur' | 'mrWhite' | null;
-
-/**
- * Vérifie les conditions de victoire après une élimination.
- * - S'il ne reste que 2 joueurs vivants et que l'un d'eux est Mr. White → Mr. White gagne.
- * - Sinon, si ce sont exactement 1 Civil + 1 Imposteur → l'Imposteur gagne.
- * - Retourne null si la partie doit continuer (pas de victoire immédiate).
- */
-export function checkVictoryAfterElimination(players: Player[]): VictoryResult {
-  const alive = players.filter((p) => !p.eliminated);
-  if (alive.length !== 2) return null;
-  const roles = alive.map((p) => p.role);
-  if (roles.includes('mrWhite')) return 'mrWhite';
-  const hasCitizen = roles.includes('citoyen');
-  const hasImpostor = roles.includes('imposteur');
-  if (hasCitizen && hasImpostor) return 'imposteur';
-  return null;
-}
+export type { Role } from '../types/game';
