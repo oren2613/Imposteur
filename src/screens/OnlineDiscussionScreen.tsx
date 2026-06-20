@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Heart } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
+import { useVoiceChat } from '../hooks/useVoiceChat';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
@@ -15,7 +16,16 @@ function isFriend(name: string, friendsList: { username: string }[]): boolean {
 }
 
 export function OnlineDiscussionScreen() {
-  const { gameState, myPlayerId, myWord, error, discussionPass, clearError, friendsList } = useOnline();
+  const {
+    gameState,
+    myPlayerId,
+    myWord,
+    error,
+    discussionPass,
+    clearError,
+    friendsList,
+    getSocket,
+  } = useOnline();
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [showMyWord, setShowMyWord] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
@@ -34,6 +44,27 @@ export function OnlineDiscussionScreen() {
     ? players.find((p) => p.id === currentPlayerId)
     : null;
   const isMyTurn = myPlayerId !== null && currentPlayerId === myPlayerId;
+
+  const peerPlayerIds = players
+    .filter((p) => !p.eliminated && p.id !== myPlayerId)
+    .map((p) => p.id);
+
+  const voiceActive = gameState?.phase === 'discussion';
+
+  const { permissionError, isMicLive, clearPermissionError } = useVoiceChat({
+    getSocket,
+    active: voiceActive,
+    myPlayerId,
+    peerPlayerIds,
+    isMyTurn,
+    micEnabled: isMicEnabled,
+  });
+
+  useEffect(() => {
+    if (!voiceActive) {
+      setIsMicEnabled(false);
+    }
+  }, [voiceActive]);
 
   useEffect(() => {
     if (!gameState || currentIndex >= order.length) return;
@@ -65,6 +96,14 @@ export function OnlineDiscussionScreen() {
       ? ((turnDurationMs - remainingMs) / turnDurationMs) * 100
       : 0;
 
+  const micStatusLabel = !isMicEnabled
+    ? 'Activer le micro'
+    : !isMyTurn
+      ? 'Micro prêt (attends ton tour)'
+      : isMicLive
+        ? 'Micro actif'
+        : 'Micro activé';
+
   return (
     <Layout title="Discussion" hideBack onBack={() => {}} backLabel="">
       <OnlineStatsBar />
@@ -73,6 +112,22 @@ export function OnlineDiscussionScreen() {
           <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">
             <span className="min-w-0 flex-1 text-center">{error}</span>
             <button type="button" onClick={clearError} className="shrink-0 underline hover:no-underline">
+              Fermer
+            </button>
+          </div>
+        )}
+
+        {permissionError && (
+          <div className="flex items-center justify-between gap-3 text-amber-700 dark:text-amber-300 text-sm bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl">
+            <span className="min-w-0 flex-1">{permissionError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                clearPermissionError();
+                setIsMicEnabled(false);
+              }}
+              className="shrink-0 underline hover:no-underline"
+            >
               Fermer
             </button>
           </div>
@@ -197,20 +252,32 @@ export function OnlineDiscussionScreen() {
                 className={`
                   shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
                   transition-colors border
-                  ${isMicEnabled ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-600 dark:text-emerald-400' : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400'}
+                  ${
+                    isMicEnabled && isMyTurn && isMicLive
+                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+                      : isMicEnabled
+                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400'
+                        : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400'
+                  }
                 `}
-                title={isMicEnabled ? 'Micro activé' : 'Micro coupé'}
+                title={micStatusLabel}
                 aria-label={isMicEnabled ? 'Couper le micro' : 'Activer le micro'}
+                aria-pressed={isMicEnabled}
               >
                 {isMicEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
               </button>
             </div>
+            {isMicEnabled && !isMyTurn && (
+              <p className="text-center text-amber-600 dark:text-amber-400 text-xs">
+                Micro activé — tu pourras parler quand ce sera ton tour.
+              </p>
+            )}
             <ViewMyWordModal
               isOpen={showMyWord}
               onClose={() => setShowMyWord(false)}
               myWord={myWord}
             />
-            {!isMyTurn && (
+            {!isMyTurn && !isMicEnabled && (
               <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
                 Attends ton tour pour parler
               </p>

@@ -32,6 +32,7 @@ import {
   forceDiscussionToVoteIfTimeout,
   getDiscussionRoomIds,
   getRoomHostName,
+  relayVoiceSignal,
 } from './roomStore.js';
 import type {
   CreateRoomPayload,
@@ -629,6 +630,21 @@ io.on('connection', (socket) => {
     }
     const gameStatePayload: GameStatePayload = { roomState: result.roomState };
     io.to(roomId).emit('game_state', gameStatePayload);
+  });
+
+  socket.on('voice_signal', (payload: unknown) => {
+    const raw = payload && typeof payload === 'object' ? payload as Record<string, unknown> : null;
+    const toPlayerId = raw?.toPlayerId;
+    const signal = raw?.signal;
+    const result = relayVoiceSignal(socket.id, toPlayerId, signal);
+    if (!result.ok) {
+      emitError(socket, result.code, result.message);
+      return;
+    }
+    io.to(result.targetSocketId).emit('voice_signal', {
+      fromPlayerId: result.fromPlayerId,
+      signal,
+    });
   });
 
   socket.on('go_to_vote', () => {

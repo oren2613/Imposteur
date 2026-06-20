@@ -768,6 +768,55 @@ export function getDiscussionRoomIds(): string[] {
   return ids;
 }
 
+export type RelayVoiceSignalResult =
+  | { ok: true; targetSocketId: string; fromPlayerId: string }
+  | { ok: false; code: string; message: string };
+
+/**
+ * Relaie une signalisation WebRTC entre joueurs de la même room en phase discussion.
+ */
+export function relayVoiceSignal(
+  socketId: string,
+  toPlayerId: unknown,
+  signal: unknown
+): RelayVoiceSignalResult {
+  const roomId = socketToRoomId.get(socketId);
+  if (!roomId) {
+    return { ok: false, code: 'not_in_room', message: 'Vous n\'êtes dans aucune room' };
+  }
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || !room.gamePlayers) {
+    return { ok: false, code: 'wrong_phase', message: 'Action non autorisée' };
+  }
+  if (room.phase !== 'discussion') {
+    return { ok: false, code: 'wrong_phase', message: 'Vocal disponible uniquement en discussion' };
+  }
+  if (typeof toPlayerId !== 'string' || !toPlayerId) {
+    return { ok: false, code: 'invalid_payload', message: 'toPlayerId requis' };
+  }
+  if (!signal || typeof signal !== 'object' || !('type' in signal)) {
+    return { ok: false, code: 'invalid_payload', message: 'signal invalide' };
+  }
+  const signalType = (signal as { type: unknown }).type;
+  if (signalType !== 'offer' && signalType !== 'answer' && signalType !== 'ice-candidate' && signalType !== 'hangup') {
+    return { ok: false, code: 'invalid_payload', message: 'type de signal invalide' };
+  }
+
+  const sender = room.gamePlayers.find((p) => p.socketId === socketId && !p.eliminated);
+  if (!sender) {
+    return { ok: false, code: 'not_a_player', message: 'Action non autorisée' };
+  }
+  const target = room.gamePlayers.find((p) => p.id === toPlayerId && !p.eliminated);
+  if (!target || !target.socketId) {
+    return { ok: false, code: 'player_not_found', message: 'Joueur introuvable' };
+  }
+  if (target.id === sender.id) {
+    return { ok: false, code: 'invalid_payload', message: 'Destinataire invalide' };
+  }
+
+  return { ok: true, targetSocketId: target.socketId, fromPlayerId: sender.id };
+}
+
 export type ContinueAfterEliminatedResult =
   | { ok: true; roomState: RoomGameState }
   | { ok: false; code: string; message: string };

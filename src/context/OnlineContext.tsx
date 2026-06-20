@@ -147,6 +147,8 @@ interface OnlineContextValue {
   inviteError: string | null;
   /** Effacer l'erreur d'invitation */
   clearInviteError: () => void;
+  /** Socket.IO (pour le vocal WebRTC) */
+  getSocket: () => Socket | null;
 }
 
 const OnlineContext = createContext<OnlineContextValue | null>(null);
@@ -530,6 +532,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     setInviteError(null);
   }, []);
 
+  const getSocket = useCallback(() => socketRef.current, []);
+
   const myStats = useMemo(() => {
     if (!gameState || !roomState || myPlayerId == null) return { gamesPlayed: 0, wins: 0 };
     const myPlayer = gameState.players.find((p) => p.id === myPlayerId);
@@ -577,6 +581,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       fetchOnlineFriends,
       inviteError,
       clearInviteError,
+      getSocket,
     }),
     [
       roomState,
@@ -612,6 +617,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       inviteFriend,
       fetchOnlineFriends,
       clearInviteError,
+      getSocket,
     ]
   );
 
