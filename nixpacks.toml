@@ -8,7 +8,7 @@ nixPkgs = ["nodejs_22", "python3", "gcc"]
 dependsOn = ["setup"]
 cmds = [
   "npm ci",
-  "cd server && npm ci",
+  "cd server && npm ci --omit=optional",
 ]
 
 [phases.build]

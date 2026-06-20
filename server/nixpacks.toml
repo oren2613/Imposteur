@@ -1,0 +1,16 @@
+# Fallback si Railway utilise server/ comme racine (sans build client monorepo).
+# Préférer la racine du repo + railway.toml à la racine.
+
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = ["npm ci --omit=optional"]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node dist/server/src/index.js"

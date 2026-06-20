@@ -14,9 +14,11 @@
     "test": "vitest run --config ../vitest.config.ts",
     "dev": "tsx watch src/index.ts"
   },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.8.0"
+  },
   "dependencies": {
     "bcrypt": "^6.0.0",
-    "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.3",

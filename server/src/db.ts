@@ -3,7 +3,7 @@
  * SQLite en local (SQLITE_PATH).
  */
 
-import Database from 'better-sqlite3';
+import type { Database as SqliteDatabase } from 'better-sqlite3';
 import pg from 'pg';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -13,16 +13,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.SQLITE_PATH ?? path.join(__dirname, '..', 'data', 'imposteur.db');
 const databaseUrl = process.env.DATABASE_URL?.trim();
 
-let sqliteDb: Database.Database | null = null;
+let BetterSqlite3Ctor: (new (path: string) => SqliteDatabase) | null = null;
+let sqliteDb: SqliteDatabase | null = null;
 let pgPool: pg.Pool | null = null;
 
 const usePostgres = Boolean(databaseUrl);
 
-function getSqliteDb(): Database.Database {
+async function loadSqliteModule(): Promise<void> {
+  if (BetterSqlite3Ctor) return;
+  try {
+    const mod = await import('better-sqlite3');
+    BetterSqlite3Ctor = mod.default;
+  } catch {
+    throw new Error(
+      'better-sqlite3 est requis en local (npm install). En production, définissez DATABASE_URL.'
+    );
+  }
+}
+
+function getSqliteDb(): SqliteDatabase {
+  if (!BetterSqlite3Ctor) {
+    throw new Error('SQLite non initialisé — appelez initDb() au démarrage');
+  }
   if (!sqliteDb) {
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    sqliteDb = new Database(dbPath);
+    sqliteDb = new BetterSqlite3Ctor(dbPath);
     initSqliteSchema(sqliteDb);
   }
   return sqliteDb;
@@ -35,7 +51,7 @@ function getPgPool(): pg.Pool {
   return pgPool;
 }
 
-function initSqliteSchema(database: Database.Database) {
+function initSqliteSchema(database: SqliteDatabase) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,6 +126,7 @@ export async function initDb(): Promise<void> {
     await initPostgresSchema(pgPool);
     return;
   }
+  await loadSqliteModule();
   getSqliteDb();
 }
 
