@@ -41,6 +41,9 @@ import {
   getAllMatchmakingSocketIds,
   getMatchmakingQueueSize,
   MATCH_TARGET,
+  MATCH_MIN,
+  setMatchmakingTimeoutHandler,
+  getMatchmakingStatus,
 } from './matchmaking.js';
 import type {
   CreateRoomPayload,
@@ -325,6 +328,13 @@ const io = new Server(httpServer, {
   cors: { origin: CORS_ORIGIN },
 });
 
+setMatchmakingTimeoutHandler(() => {
+  const match = tryFormMatchmaking({ forceMin: true });
+  void applyMatchmakingMatch(match).then(() => {
+    broadcastMatchmakingUpdate();
+  });
+});
+
 /** Timers de countdown roleReveal → discussion (roomId → timeout) */
 const roleRevealTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -396,12 +406,14 @@ function emitError(socket: import('socket.io').Socket, code: string, message: st
 }
 
 function broadcastMatchmakingUpdate(): void {
-  const queueSize = getMatchmakingQueueSize();
+  const status = getMatchmakingStatus();
   for (const socketId of getAllMatchmakingSocketIds()) {
     io.to(socketId).emit('matchmaking_update', {
       searching: true,
-      queueSize,
-      targetSize: MATCH_TARGET,
+      queueSize: status.queueSize,
+      targetSize: status.targetSize,
+      minSize: status.minSize,
+      timeoutAt: status.timeoutAt,
     });
   }
 }
@@ -605,6 +617,8 @@ io.on('connection', (socket) => {
         searching: true,
         queueSize: result.queueSize,
         targetSize: result.targetSize,
+        minSize: result.minSize,
+        timeoutAt: result.timeoutAt,
       });
       broadcastMatchmakingUpdate();
 

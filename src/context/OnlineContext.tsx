@@ -112,6 +112,9 @@ interface OnlineContextValue {
   /** Joueurs déjà en file / cible pour former une room */
   matchmakingQueueSize: number;
   matchmakingTargetSize: number;
+  matchmakingMinSize: number;
+  /** Epoch ms : match auto à 3 joueurs si la 4e n'arrive pas */
+  matchmakingTimeoutAt: number | null;
   /** Code room extrait d'un lien d'invitation (?room= ou /join/CODE) */
   inviteLinkRoomCode: string | null;
   /** Effacer le code extrait d'un lien d'invitation */
@@ -186,6 +189,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [isMatchmaking, setIsMatchmaking] = useState(false);
   const [matchmakingQueueSize, setMatchmakingQueueSize] = useState(0);
   const [matchmakingTargetSize, setMatchmakingTargetSize] = useState(4);
+  const [matchmakingMinSize, setMatchmakingMinSize] = useState(3);
+  const [matchmakingTimeoutAt, setMatchmakingTimeoutAt] = useState<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const inviteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
@@ -208,7 +213,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   }, [clearErrorTimeout]);
 
   const connect = useCallback(() => {
-    if (socketRef.current?.connected) return socketRef.current;
+    if (socketRef.current) return socketRef.current;
     const socket = io(SOCKET_URL, { autoConnect: true });
     socketRef.current = socket;
 
@@ -333,7 +338,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
     socket.on(
       'matchmaking_update',
-      (payload: { searching?: boolean; queueSize?: number; targetSize?: number }) => {
+      (payload: { searching?: boolean; queueSize?: number; targetSize?: number; minSize?: number; timeoutAt?: number | null }) => {
         const searching = payload.searching === true;
         setIsMatchmaking(searching);
         if (typeof payload.queueSize === 'number') {
@@ -342,13 +347,23 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
         if (typeof payload.targetSize === 'number') {
           setMatchmakingTargetSize(payload.targetSize);
         }
+        if (typeof payload.minSize === 'number') {
+          setMatchmakingMinSize(payload.minSize);
+        }
+        if (payload.timeoutAt !== undefined) {
+          setMatchmakingTimeoutAt(payload.timeoutAt);
+        }
         if (!searching) {
           setMatchmakingQueueSize(0);
+          setMatchmakingTimeoutAt(null);
         }
       }
     );
 
     socket.on('error', (payload: { code: string; message: string }) => {
+      setIsMatchmaking(false);
+      setMatchmakingQueueSize(0);
+      setMatchmakingTimeoutAt(null);
       if (reconnectingRef.current) {
         reconnectingRef.current = false;
         setIsReconnecting(false);
@@ -476,12 +491,19 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       saveSession(playerSessionId, '', playerName);
       const socket = connect();
       const token = getToken();
-      setIsMatchmaking(true);
-      socket.emit('join_matchmaking', {
+      const payload = {
         playerName,
         clientSessionId: playerSessionId,
         ...(token && { authToken: token }),
-      });
+      };
+      const emitJoin = () => {
+        socket.emit('join_matchmaking', payload);
+      };
+      if (socket.connected) {
+        emitJoin();
+      } else {
+        socket.once('connect', emitJoin);
+      }
     },
     [connect]
   );
@@ -492,6 +514,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     }
     setIsMatchmaking(false);
     setMatchmakingQueueSize(0);
+    setMatchmakingTimeoutAt(null);
   }, []);
 
   const leaveRoom = useCallback(() => {
@@ -628,6 +651,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       isMatchmaking,
       matchmakingQueueSize,
       matchmakingTargetSize,
+      matchmakingMinSize,
+      matchmakingTimeoutAt,
       inviteLinkRoomCode,
       clearInviteLinkRoomCode,
       leaveRoom,

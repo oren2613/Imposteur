@@ -16,6 +16,8 @@ export function OnlineCreateOrJoinScreen() {
     isMatchmaking,
     matchmakingQueueSize,
     matchmakingTargetSize,
+    matchmakingMinSize,
+    matchmakingTimeoutAt,
     error,
     clearError,
     inviteLinkRoomCode,
@@ -24,6 +26,20 @@ export function OnlineCreateOrJoinScreen() {
   const { user } = useAuth();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
+  const [timeoutSecondsLeft, setTimeoutSecondsLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isMatchmaking || !matchmakingTimeoutAt) {
+      setTimeoutSecondsLeft(null);
+      return;
+    }
+    const tick = () => {
+      setTimeoutSecondsLeft(Math.max(0, Math.ceil((matchmakingTimeoutAt - Date.now()) / 1000)));
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [isMatchmaking, matchmakingTimeoutAt]);
 
   useEffect(() => {
     if (user?.username && !playerName) setPlayerName(user.username);
@@ -115,8 +131,22 @@ export function OnlineCreateOrJoinScreen() {
                 {matchmakingQueueSize > 1 ? 's' : ''}
               </p>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Une room se crée automatiquement dès {matchmakingTargetSize} joueurs.
+            <p className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+              <span className="block">
+                Match immédiat à {matchmakingTargetSize} joueurs, ou à {matchmakingMinSize} minimum.
+              </span>
+              {matchmakingQueueSize >= matchmakingMinSize &&
+                matchmakingQueueSize < matchmakingTargetSize &&
+                timeoutSecondsLeft != null && (
+                  <span className="block text-violet-600 dark:text-violet-400">
+                    Partie à {matchmakingMinSize} joueurs dans {timeoutSecondsLeft}s si personne d&apos;autre ne rejoint.
+                  </span>
+                )}
+              {matchmakingQueueSize < matchmakingMinSize && (
+                <span className="block">
+                  Il faut au moins {matchmakingMinSize} joueurs en recherche (pseudo différent par joueur).
+                </span>
+              )}
             </p>
             <Button fullWidth variant="secondary" onClick={leaveMatchmaking}>
               Annuler la recherche

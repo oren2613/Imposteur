@@ -10,13 +10,14 @@ import {
 } from './roomStore.js';
 import type { GameConfig, RoomLobbyState } from './types.js';
 
-export const MATCH_TARGET = 4;
-
-const MATCHMAKING_CONFIG: GameConfig = {
-  playerCount: MATCH_TARGET,
-  impostorCount: 1,
-  mrWhiteEnabled: true,
-};
+/** Minimum pour lancer une partie */
+export const MATCH_MIN = 3;
+/** Nombre idéal de joueurs dans une room matchmaking */
+export const MATCH_PREFERRED = 4;
+/** @deprecated alias */
+export const MATCH_TARGET = MATCH_PREFERRED;
+/** Délai avant match à 3 joueurs si la 4e personne n'arrive pas */
+export const MATCH_TIMEOUT_MS = 20_000;
 
 interface QueueEntry {
   socketId: string;
@@ -26,6 +27,44 @@ interface QueueEntry {
 }
 
 const queue: QueueEntry[] = [];
+let matchTimer: ReturnType<typeof setTimeout> | null = null;
+let matchTimeoutAt: number | null = null;
+let onTimeoutMatch: (() => void) | null = null;
+
+export function setMatchmakingTimeoutHandler(handler: () => void): void {
+  onTimeoutMatch = handler;
+}
+
+function buildConfigForCount(playerCount: number): GameConfig {
+  return {
+    playerCount,
+    impostorCount: 1,
+    mrWhiteEnabled: playerCount >= 4,
+  };
+}
+
+function clearMatchTimer(): void {
+  if (matchTimer) {
+    clearTimeout(matchTimer);
+    matchTimer = null;
+  }
+  matchTimeoutAt = null;
+}
+
+/** Planifie un match à MATCH_MIN joueurs si personne d'autre n'arrive. */
+export function scheduleMatchmakingTimeout(): number | null {
+  if (matchTimer) return matchTimeoutAt;
+  if (queue.length >= MATCH_PREFERRED || queue.length < MATCH_MIN) {
+    return null;
+  }
+  matchTimeoutAt = Date.now() + MATCH_TIMEOUT_MS;
+  matchTimer = setTimeout(() => {
+    matchTimer = null;
+    matchTimeoutAt = null;
+    onTimeoutMatch?.();
+  }, MATCH_TIMEOUT_MS);
+  return matchTimeoutAt;
+}
 
 export function getMatchmakingQueueSize(): number {
   return queue.length;
@@ -40,7 +79,7 @@ export function getAllMatchmakingSocketIds(): string[] {
 }
 
 export type AddToMatchmakingResult =
-  | { ok: true; queueSize: number; targetSize: number }
+  | { ok: true; queueSize: number; targetSize: number; minSize: number; timeoutAt: number | null }
   | { ok: false; code: string; message: string };
 
 export function addToMatchmakingQueue(
@@ -65,7 +104,13 @@ export function addToMatchmakingQueue(
   }
 
   if (isInMatchmakingQueue(socketId)) {
-    return { ok: true, queueSize: queue.length, targetSize: MATCH_TARGET };
+    return {
+      ok: true,
+      queueSize: queue.length,
+      targetSize: MATCH_PREFERRED,
+      minSize: MATCH_MIN,
+      timeoutAt: matchTimeoutAt,
+    };
   }
 
   queue.push({
@@ -75,13 +120,33 @@ export function addToMatchmakingQueue(
     avatarUrl: avatarUrl ?? null,
   });
 
-  return { ok: true, queueSize: queue.length, targetSize: MATCH_TARGET };
+  let timeoutAt: number | null = null;
+  if (queue.length >= MATCH_PREFERRED) {
+    clearMatchTimer();
+  } else if (queue.length >= MATCH_MIN) {
+    timeoutAt = scheduleMatchmakingTimeout();
+  } else {
+    clearMatchTimer();
+  }
+
+  return {
+    ok: true,
+    queueSize: queue.length,
+    targetSize: MATCH_PREFERRED,
+    minSize: MATCH_MIN,
+    timeoutAt,
+  };
 }
 
 export function removeFromMatchmakingQueue(socketId: string): boolean {
   const idx = queue.findIndex((e) => e.socketId === socketId);
   if (idx === -1) return false;
   queue.splice(idx, 1);
+  if (queue.length >= MATCH_MIN && queue.length < MATCH_PREFERRED) {
+    scheduleMatchmakingTimeout();
+  } else {
+    clearMatchTimer();
+  }
   return true;
 }
 
@@ -97,15 +162,16 @@ export interface MatchmakingFormedMatch {
   players: MatchedPlayer[];
 }
 
-/** Forme une room dès que la file atteint MATCH_TARGET joueurs. */
-export function tryFormMatchmaking(): MatchmakingFormedMatch | null {
-  if (queue.length < MATCH_TARGET) return null;
+function formMatchWithCount(count: number): MatchmakingFormedMatch | null {
+  if (queue.length < count || count < MATCH_MIN) return null;
 
-  const group = queue.splice(0, MATCH_TARGET);
+  clearMatchTimer();
+  const group = queue.splice(0, count);
   const [host, ...rest] = group;
+  const config = buildConfigForCount(count);
 
   const createResult = createRoom(
-    MATCHMAKING_CONFIG,
+    config,
     host.playerName,
     host.socketId,
     host.sessionId,
@@ -145,5 +211,34 @@ export function tryFormMatchmaking(): MatchmakingFormedMatch | null {
     });
   }
 
+  if (players.length < MATCH_MIN) {
+    return null;
+  }
+
   return { roomId: createResult.roomId, players };
+}
+
+/** Match immédiat à 4 joueurs, ou à 3+ si forceMin (timeout). */
+export function tryFormMatchmaking(options?: { forceMin?: boolean }): MatchmakingFormedMatch | null {
+  if (queue.length >= MATCH_PREFERRED) {
+    return formMatchWithCount(MATCH_PREFERRED);
+  }
+  if (options?.forceMin && queue.length >= MATCH_MIN) {
+    return formMatchWithCount(queue.length);
+  }
+  return null;
+}
+
+export function getMatchmakingStatus(): {
+  queueSize: number;
+  targetSize: number;
+  minSize: number;
+  timeoutAt: number | null;
+} {
+  return {
+    queueSize: queue.length,
+    targetSize: MATCH_PREFERRED,
+    minSize: MATCH_MIN,
+    timeoutAt: matchTimeoutAt,
+  };
 }
