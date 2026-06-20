@@ -6,7 +6,6 @@
 import { createServer } from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { Server } from 'socket.io';
@@ -300,8 +299,7 @@ app.post('/friend_requests/:id/refuse', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const clientDistDir = path.join(__dirname, '..', 'public');
+const clientDistDir = path.join(process.cwd(), 'public');
 
 /** Anciens liens /join/CODE → redirection vers l'app React */
 app.get('/join/:code', (req, res) => {
