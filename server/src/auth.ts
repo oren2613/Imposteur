@@ -36,13 +36,13 @@ export function verifyToken(token: string): JwtPayload | null {
 }
 
 export async function authenticateUser(username: string, password: string): Promise<UserRow | null> {
-  const user = findUserByUsername(username);
+  const user = await findUserByUsername(username);
   if (!user) return null;
   const ok = await comparePassword(password, user.password_hash);
   return ok ? user : null;
 }
 
-export function getUserFromToken(token: string): UserRow | null {
+export async function getUserFromToken(token: string): Promise<UserRow | null> {
   const payload = verifyToken(token);
   if (!payload) return null;
   return findUserById(payload.userId);

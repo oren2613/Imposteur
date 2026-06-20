@@ -48,6 +48,7 @@ import {
   getUserFromToken,
 } from './auth.js';
 import {
+  initDb,
   createUser,
   listFriends,
   listUserIdsWhoHaveAsFriend,
@@ -84,7 +85,7 @@ app.post('/auth/register', async (req, res) => {
   }
   try {
     const hash = await hashPassword(password);
-    const user = createUser(username, hash);
+    const user = await createUser(username, hash);
     const token = signToken({ userId: user.id, username: user.username });
     res.json({ token, user: { id: user.id, username: user.username } });
   } catch (e) {
@@ -123,31 +124,32 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
     res.status(401).json({ error: 'Token requis' });
     return;
   }
-  const user = getUserFromToken(token);
-  if (!user) {
-    res.status(401).json({ error: 'Token invalide ou expiré' });
-    return;
-  }
-  (req as AuthReq).user = user;
-  next();
+  void getUserFromToken(token).then((user) => {
+    if (!user) {
+      res.status(401).json({ error: 'Token invalide ou expiré' });
+      return;
+    }
+    (req as AuthReq).user = user;
+    next();
+  });
 }
 
 app.get('/auth/me', authMiddleware, (req, res) => {
   res.json({ user: { id: (req as AuthReq).user.id, username: (req as AuthReq).user.username } });
 });
 
-app.get('/friends', authMiddleware, (req, res) => {
-  const friends = listFriends((req as AuthReq).user.id);
+app.get('/friends', authMiddleware, async (req, res) => {
+  const friends = await listFriends((req as AuthReq).user.id);
   res.json({ friends });
 });
 
-app.post('/friends', authMiddleware, (req, res) => {
+app.post('/friends', authMiddleware, async (req, res) => {
   const { username } = req.body ?? {};
   if (!username || typeof username !== 'string') {
     res.status(400).json({ error: 'username requis', code: 'INVALID_INPUT' });
     return;
   }
-  const result = addFriend((req as AuthReq).user.id, username.trim());
+  const result = await addFriend((req as AuthReq).user.id, username.trim());
   if (!result.ok) {
     const message =
       result.code === 'not_found'
@@ -161,13 +163,13 @@ app.post('/friends', authMiddleware, (req, res) => {
   res.json({ friend: result.friend });
 });
 
-app.delete('/friends/:id', authMiddleware, (req, res) => {
+app.delete('/friends/:id', authMiddleware, async (req, res) => {
   const friendId = Number(req.params.id);
   if (!Number.isInteger(friendId)) {
     res.status(400).json({ error: 'ID invalide' });
     return;
   }
-  const removed = removeFriend((req as AuthReq).user.id, friendId);
+  const removed = await removeFriend((req as AuthReq).user.id, friendId);
   if (!removed) {
     res.status(404).json({ error: 'Ami introuvable' });
     return;
@@ -176,13 +178,13 @@ app.delete('/friends/:id', authMiddleware, (req, res) => {
 });
 
 // --- Demandes d'ami (envoyer, lister, accepter, refuser)
-app.post('/friend_requests', authMiddleware, (req, res) => {
+app.post('/friend_requests', authMiddleware, async (req, res) => {
   const { username } = req.body ?? {};
   if (!username || typeof username !== 'string') {
     res.status(400).json({ error: 'username requis' });
     return;
   }
-  const result = createFriendRequest((req as AuthReq).user.id, username.trim());
+  const result = await createFriendRequest((req as AuthReq).user.id, username.trim());
   if (!result.ok) {
     const message =
       result.code === 'not_found'
@@ -209,18 +211,18 @@ app.post('/friend_requests', authMiddleware, (req, res) => {
   });
 });
 
-app.get('/friend_requests', authMiddleware, (req, res) => {
-  const requests = listPendingFriendRequests((req as AuthReq).user.id);
+app.get('/friend_requests', authMiddleware, async (req, res) => {
+  const requests = await listPendingFriendRequests((req as AuthReq).user.id);
   res.json({ requests });
 });
 
-app.post('/friend_requests/:id/accept', authMiddleware, (req, res) => {
+app.post('/friend_requests/:id/accept', authMiddleware, async (req, res) => {
   const requestId = Number(req.params.id);
   if (!Number.isInteger(requestId)) {
     res.status(400).json({ error: 'ID invalide' });
     return;
   }
-  const friend = acceptFriendRequest(requestId, (req as AuthReq).user.id);
+  const friend = await acceptFriendRequest(requestId, (req as AuthReq).user.id);
   if (!friend) {
     res.status(404).json({ error: 'Demande introuvable ou expirée' });
     return;
@@ -228,13 +230,13 @@ app.post('/friend_requests/:id/accept', authMiddleware, (req, res) => {
   res.json({ friend });
 });
 
-app.post('/friend_requests/:id/refuse', authMiddleware, (req, res) => {
+app.post('/friend_requests/:id/refuse', authMiddleware, async (req, res) => {
   const requestId = Number(req.params.id);
   if (!Number.isInteger(requestId)) {
     res.status(400).json({ error: 'ID invalide' });
     return;
   }
-  const refused = refuseFriendRequest(requestId, (req as AuthReq).user.id);
+  const refused = await refuseFriendRequest(requestId, (req as AuthReq).user.id);
   if (!refused) {
     res.status(404).json({ error: 'Demande introuvable ou expirée' });
     return;
@@ -303,9 +305,9 @@ function emitError(socket: import('socket.io').Socket, code: string, message: st
   socket.emit('error', payload);
 }
 
-function associateSocketWithUser(socket: import('socket.io').Socket, authToken: string | undefined): void {
+async function associateSocketWithUser(socket: import('socket.io').Socket, authToken: string | undefined): Promise<void> {
   if (!authToken || typeof authToken !== 'string') return;
-  const user = getUserFromToken(authToken);
+  const user = await getUserFromToken(authToken);
   if (user) {
     const uid = Number(user.id);
     const prev = userIdToSocketId.get(uid);
@@ -323,8 +325,8 @@ const userIdToSocketId = new Map<number, string>();
 const DEBUG_PRESENCE = process.env.DEBUG_PRESENCE === '1';
 
 /** Notifie les amis d'un utilisateur que son statut en ligne a changé */
-function broadcastFriendStatus(userId: number, online: boolean): void {
-  const friendIds = listUserIdsWhoHaveAsFriend(userId);
+async function broadcastFriendStatus(userId: number, online: boolean): Promise<void> {
+  const friendIds = await listUserIdsWhoHaveAsFriend(userId);
   const payload = { friendId: Number(userId), online };
   for (const friendUserId of friendIds) {
     const socketId = userIdToSocketId.get(Number(friendUserId));
@@ -343,16 +345,16 @@ io.on('connection', (socket) => {
       ? (payload as { token: string }).token
       : null;
     if (!token) return;
-    const user = getUserFromToken(token);
-    if (user) {
+    void getUserFromToken(token).then((user) => {
+      if (!user) return;
       const uid = Number(user.id);
       const prev = userIdToSocketId.get(uid);
       if (prev) socketToUserId.delete(prev);
       socketToUserId.set(socket.id, uid);
       userIdToSocketId.set(uid, socket.id);
       socket.emit('authenticated', { userId: uid, username: user.username });
-      broadcastFriendStatus(uid, true);
-    }
+      void broadcastFriendStatus(uid, true);
+    });
   });
 
   socket.on('invite_to_room', (payload: unknown) => {
@@ -392,14 +394,15 @@ io.on('connection', (socket) => {
       ack({ friendIds: [] });
       return;
     }
-    const friends = listFriends(userId);
-    const friendIds = friends
-      .filter((f) => userIdToSocketId.has(Number(f.id)))
-      .map((f) => Number(f.id));
-    if (DEBUG_PRESENCE) {
-      console.log(`[presence] get_online_friends userId=${userId} totalFriends=${friends.length} online=${friendIds.length} ids=${JSON.stringify(friendIds)}`);
-    }
-    ack({ friendIds });
+    void listFriends(userId).then((friends) => {
+      const friendIds = friends
+        .filter((f) => userIdToSocketId.has(Number(f.id)))
+        .map((f) => Number(f.id));
+      if (DEBUG_PRESENCE) {
+        console.log(`[presence] get_online_friends userId=${userId} totalFriends=${friends.length} online=${friendIds.length} ids=${JSON.stringify(friendIds)}`);
+      }
+      ack({ friendIds });
+    });
   });
 
   socket.on('create_room', (payload: unknown) => {
@@ -417,15 +420,16 @@ io.on('connection', (socket) => {
     const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
       ? (payload as { authToken: string }).authToken
       : undefined;
-    associateSocketWithUser(socket, authToken);
-    const uidCreate = socketToUserId.get(socket.id);
-    if (uidCreate != null) broadcastFriendStatus(uidCreate, true);
-
-    socket.join(result.roomId);
-    socket.emit('room_created', {
-      roomId: result.roomId,
-      roomState: result.roomState,
-    });
+    void (async () => {
+      await associateSocketWithUser(socket, authToken);
+      const uidCreate = socketToUserId.get(socket.id);
+      if (uidCreate != null) void broadcastFriendStatus(uidCreate, true);
+      socket.join(result.roomId);
+      socket.emit('room_created', {
+        roomId: result.roomId,
+        roomState: result.roomState,
+      });
+    })();
   });
 
   socket.on('join_room', (payload: unknown) => {
@@ -443,17 +447,18 @@ io.on('connection', (socket) => {
     const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
       ? (payload as { authToken: string }).authToken
       : undefined;
-    associateSocketWithUser(socket, authToken);
-    const uidJoin = socketToUserId.get(socket.id);
-    if (uidJoin != null) broadcastFriendStatus(uidJoin, true);
-
-    socket.join(payload.roomId);
-    socket.emit('room_joined', {
-      roomId: payload.roomId,
-      roomState: result.roomState,
-      youAreHost: result.youAreHost,
-    });
-    io.to(payload.roomId).emit('room_state', { roomState: result.roomState });
+    void (async () => {
+      await associateSocketWithUser(socket, authToken);
+      const uidJoin = socketToUserId.get(socket.id);
+      if (uidJoin != null) void broadcastFriendStatus(uidJoin, true);
+      socket.join(payload.roomId);
+      socket.emit('room_joined', {
+        roomId: payload.roomId,
+        roomState: result.roomState,
+        youAreHost: result.youAreHost,
+      });
+      io.to(payload.roomId).emit('room_state', { roomState: result.roomState });
+    })();
   });
 
   socket.on('reconnect_to_room', (payload: unknown) => {
@@ -470,21 +475,23 @@ io.on('connection', (socket) => {
     const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
       ? (payload as { authToken: string }).authToken
       : undefined;
-    associateSocketWithUser(socket, authToken);
-    const uidReconnect = socketToUserId.get(socket.id);
-    if (uidReconnect != null) broadcastFriendStatus(uidReconnect, true);
-    socket.join(roomId);
-    if (result.kind === 'lobby') {
-      socket.emit('room_joined', {
-        roomId,
-        roomState: result.roomState,
-        youAreHost: result.youAreHost,
-      });
-      io.to(roomId).emit('room_state', { roomState: result.roomState });
-    } else {
-      socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
-      socket.emit('game_state', { roomState: result.roomState });
-    }
+    void (async () => {
+      await associateSocketWithUser(socket, authToken);
+      const uidReconnect = socketToUserId.get(socket.id);
+      if (uidReconnect != null) void broadcastFriendStatus(uidReconnect, true);
+      socket.join(roomId);
+      if (result.kind === 'lobby') {
+        socket.emit('room_joined', {
+          roomId,
+          roomState: result.roomState,
+          youAreHost: result.youAreHost,
+        });
+        io.to(roomId).emit('room_state', { roomState: result.roomState });
+      } else {
+        socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
+        socket.emit('game_state', { roomState: result.roomState });
+      }
+    })();
   });
 
   socket.on('start_game', () => {
@@ -715,7 +722,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const uid = socketToUserId.get(socket.id);
     if (uid != null) {
-      broadcastFriendStatus(uid, false);
+      void broadcastFriendStatus(uid, false);
       socketToUserId.delete(socket.id);
       if (userIdToSocketId.get(uid) === socket.id) userIdToSocketId.delete(uid);
     }
@@ -762,6 +769,14 @@ setInterval(() => {
   }
 }, DISCUSSION_TIMEOUT_CHECK_MS);
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Serveur prêt sur http://0.0.0.0:${PORT}`);
+async function startServer() {
+  await initDb();
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Serveur prêt sur http://0.0.0.0:${PORT} (${process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite'})`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Impossible de démarrer le serveur:', err);
+  process.exit(1);
 });
