@@ -10,7 +10,7 @@
     "build": "tsc",
     "build:all": "npm run build:client && tsc",
     "build:client": "cd .. && npm ci && npm run build && rm -rf server/public && cp -r dist server/public",
-    "start": "node dist/server/src/index.js",
+    "start": "node dist/src/index.js",
     "test": "vitest run --config ../vitest.config.ts",
     "dev": "tsx watch src/index.ts"
   },

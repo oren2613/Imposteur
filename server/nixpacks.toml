@@ -13,4 +13,4 @@ dependsOn = ["install"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "node dist/server/src/index.js"
+cmd = "node dist/src/index.js"
