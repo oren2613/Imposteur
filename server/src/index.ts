@@ -50,6 +50,7 @@ import {
 import {
   initDb,
   createUser,
+  findUserById,
   listFriends,
   listUserIdsWhoHaveAsFriend,
   addFriend,
@@ -58,8 +59,23 @@ import {
   listPendingFriendRequests,
   acceptFriendRequest,
   refuseFriendRequest,
+  updateUserAvatar,
   type UserRow,
 } from './db.js';
+import { toPublicUser } from './user.js';
+
+const MAX_AVATAR_LENGTH = 200_000;
+const AVATAR_DATA_URL_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+
+function isValidAvatarDataUrl(value: string): boolean {
+  return value.length <= MAX_AVATAR_LENGTH && AVATAR_DATA_URL_RE.test(value);
+}
+
+async function getAvatarUrlFromAuthToken(authToken: string | undefined): Promise<string | null> {
+  if (!authToken || typeof authToken !== 'string') return null;
+  const user = await getUserFromToken(authToken);
+  return user?.avatar_url ?? null;
+}
 
 const PORT = Number(process.env.PORT) || 3001;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
@@ -87,7 +103,7 @@ app.post('/auth/register', async (req, res) => {
     const hash = await hashPassword(password);
     const user = await createUser(username, hash);
     const token = signToken({ userId: user.id, username: user.username });
-    res.json({ token, user: { id: user.id, username: user.username } });
+    res.json({ token, user: toPublicUser(user) });
   } catch (e) {
     if (e instanceof Error && (e.message === 'USERNAME_TAKEN' || e.message === 'USERNAME_INVALID')) {
       res.status(400).json({ error: e.message === 'USERNAME_TAKEN' ? 'Ce pseudo est déjà pris' : 'Pseudo invalide (2-30 caractères)' });
@@ -109,7 +125,7 @@ app.post('/auth/login', async (req, res) => {
     return;
   }
   const token = signToken({ userId: user.id, username: user.username });
-  res.json({ token, user: { id: user.id, username: user.username } });
+  res.json({ token, user: toPublicUser(user) });
 });
 
 // Requête authentifiée (après authMiddleware)
@@ -135,7 +151,30 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
 }
 
 app.get('/auth/me', authMiddleware, (req, res) => {
-  res.json({ user: { id: (req as AuthReq).user.id, username: (req as AuthReq).user.username } });
+  res.json({ user: toPublicUser((req as AuthReq).user) });
+});
+
+app.patch('/auth/me/avatar', authMiddleware, async (req, res) => {
+  const { avatarDataUrl } = req.body ?? {};
+  if (!avatarDataUrl || typeof avatarDataUrl !== 'string' || !isValidAvatarDataUrl(avatarDataUrl)) {
+    res.status(400).json({ error: 'Image invalide (JPEG, PNG ou WebP, max ~150 Ko)' });
+    return;
+  }
+  const updated = await updateUserAvatar((req as AuthReq).user.id, avatarDataUrl);
+  if (!updated) {
+    res.status(404).json({ error: 'Utilisateur introuvable' });
+    return;
+  }
+  res.json({ user: toPublicUser(updated) });
+});
+
+app.delete('/auth/me/avatar', authMiddleware, async (req, res) => {
+  const updated = await updateUserAvatar((req as AuthReq).user.id, null);
+  if (!updated) {
+    res.status(404).json({ error: 'Utilisateur introuvable' });
+    return;
+  }
+  res.json({ user: toPublicUser(updated) });
 });
 
 app.get('/friends', authMiddleware, async (req, res) => {
@@ -206,6 +245,7 @@ app.post('/friend_requests', authMiddleware, async (req, res) => {
         requestId: result.requestId,
         fromUserId: (req as AuthReq).user.id,
         fromUsername: (req as AuthReq).user.username,
+        fromAvatarUrl: (req as AuthReq).user.avatar_url ?? null,
       });
     }
   });
@@ -382,8 +422,14 @@ io.on('connection', (socket) => {
       return;
     }
     const hostName = getRoomHostName(roomId) ?? 'Un ami';
-    io.to(friendSocketId).emit('game_invite', { roomId, hostName });
-    socket.emit('invite_sent', { success: true });
+    void findUserById(hostUserId).then((hostUser) => {
+      io.to(friendSocketId).emit('game_invite', {
+        roomId,
+        hostName,
+        hostAvatarUrl: hostUser?.avatar_url ?? null,
+      });
+      socket.emit('invite_sent', { success: true });
+    });
   });
 
   socket.on('get_online_friends', (ack: (res: { friendIds: number[] }) => void) => {
@@ -411,16 +457,17 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = createRoom(payload.config, payload.playerName, socket.id, payload.clientSessionId);
-    if (!result.ok) {
-      emitError(socket, result.code, result.message);
-      return;
-    }
-
-    const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
-      ? (payload as { authToken: string }).authToken
-      : undefined;
     void (async () => {
+      const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
+        ? (payload as { authToken: string }).authToken
+        : undefined;
+      const avatarUrl = await getAvatarUrlFromAuthToken(authToken);
+      const result = createRoom(payload.config, payload.playerName, socket.id, payload.clientSessionId, avatarUrl);
+      if (!result.ok) {
+        emitError(socket, result.code, result.message);
+        return;
+      }
+
       await associateSocketWithUser(socket, authToken);
       const uidCreate = socketToUserId.get(socket.id);
       if (uidCreate != null) void broadcastFriendStatus(uidCreate, true);
@@ -438,16 +485,17 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = joinRoom(payload.roomId, payload.playerName, socket.id, payload.clientSessionId);
-    if (!result.ok) {
-      emitError(socket, result.code, result.message);
-      return;
-    }
-
-    const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
-      ? (payload as { authToken: string }).authToken
-      : undefined;
     void (async () => {
+      const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
+        ? (payload as { authToken: string }).authToken
+        : undefined;
+      const avatarUrl = await getAvatarUrlFromAuthToken(authToken);
+      const result = joinRoom(payload.roomId, payload.playerName, socket.id, payload.clientSessionId, avatarUrl);
+      if (!result.ok) {
+        emitError(socket, result.code, result.message);
+        return;
+      }
+
       await associateSocketWithUser(socket, authToken);
       const uidJoin = socketToUserId.get(socket.id);
       if (uidJoin != null) void broadcastFriendStatus(uidJoin, true);
@@ -466,16 +514,17 @@ io.on('connection', (socket) => {
       emitError(socket, 'invalid_payload', 'Payload reconnect_to_room invalide');
       return;
     }
-    const roomId = payload.roomId.trim().toUpperCase();
-    const result = reconnectToRoom(roomId, socket.id, payload.playerSessionId, payload.playerName);
-    if (!result.ok) {
-      emitError(socket, result.code, result.message);
-      return;
-    }
-    const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
-      ? (payload as { authToken: string }).authToken
-      : undefined;
     void (async () => {
+      const roomId = payload.roomId.trim().toUpperCase();
+      const authToken = payload && typeof payload === 'object' && 'authToken' in payload && typeof (payload as { authToken: string }).authToken === 'string'
+        ? (payload as { authToken: string }).authToken
+        : undefined;
+      const avatarUrl = await getAvatarUrlFromAuthToken(authToken);
+      const result = reconnectToRoom(roomId, socket.id, payload.playerSessionId, payload.playerName, avatarUrl);
+      if (!result.ok) {
+        emitError(socket, result.code, result.message);
+        return;
+      }
       await associateSocketWithUser(socket, authToken);
       const uidReconnect = socketToUserId.get(socket.id);
       if (uidReconnect != null) void broadcastFriendStatus(uidReconnect, true);

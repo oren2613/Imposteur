@@ -9,6 +9,7 @@ import { sendFriendRequestApi } from '../api/auth';
 import { buildRoomInviteLink } from '../utils/roomInviteLink';
 import type { OnlineGameConfig } from '../types/online';
 import { Heart, Link2 } from 'lucide-react';
+import { UserAvatar } from '../components/UserAvatar';
 
 export function OnlineLobbyScreen() {
   const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError, friendsList, loadFriends, fetchOnlineFriends } = useOnline();
@@ -113,9 +114,7 @@ export function OnlineLobbyScreen() {
                   className="flex items-center justify-between gap-3 py-2 text-slate-800 dark:text-slate-100"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-medium shrink-0">
-                      {m.isHost ? '★' : '·'}
-                    </span>
+                    <UserAvatar username={m.name} avatarUrl={m.avatarUrl} size="md" />
                     <span className="truncate flex items-center gap-1">
                       {m.name}
                       {isAlreadyFriend && (

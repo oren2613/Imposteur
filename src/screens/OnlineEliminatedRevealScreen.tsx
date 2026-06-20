@@ -3,6 +3,7 @@ import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
+import { UserAvatar } from '../components/UserAvatar';
 
 function isFriend(name: string, friendsList: { username: string }[]): boolean {
   const n = name.trim().toLowerCase();
@@ -39,6 +40,9 @@ export function OnlineEliminatedRevealScreen() {
           </div>
         )}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-lg border border-slate-200 dark:border-slate-700 text-center">
+          <div className="flex justify-center mb-4">
+            <UserAvatar username={eliminated.name} avatarUrl={eliminated.avatarUrl} size="xl" />
+          </div>
           <p className="text-slate-600 dark:text-slate-400 mb-2 flex items-center justify-center gap-2">
             <span className="inline-flex items-center gap-1.5">
               {eliminated.name}

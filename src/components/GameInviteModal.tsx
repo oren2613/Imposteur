@@ -1,6 +1,7 @@
 import { useOnline } from '../context/OnlineContext';
 import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
+import { UserAvatar } from './UserAvatar';
 
 export function GameInviteModal() {
   const { pendingInvite, clearPendingInvite, joinRoom } = useOnline();
@@ -17,6 +18,13 @@ export function GameInviteModal() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-full">
+        <div className="flex justify-center mb-4">
+          <UserAvatar
+            username={pendingInvite.hostName}
+            avatarUrl={pendingInvite.hostAvatarUrl}
+            size="xl"
+          />
+        </div>
         <p className="text-lg font-medium text-slate-800 dark:text-slate-100 text-center mb-2">
           {pendingInvite.hostName} t&apos;invite à une partie
         </p>

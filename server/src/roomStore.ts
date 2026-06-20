@@ -140,7 +140,7 @@ function toLobbyState(room: Room): RoomLobbyState {
   const statsMap = room.stats ?? new Map<string, PlayerStats>();
   const members: LobbyMemberPublic[] = room.members.map((m) => {
     const s = statsMap.get(m.sessionId ?? '') ?? { gamesPlayed: 0, wins: 0 };
-    return { socketId: m.socketId, name: m.name, isHost: m.isHost, gamesPlayed: s.gamesPlayed, wins: s.wins };
+    return { socketId: m.socketId, name: m.name, isHost: m.isHost, gamesPlayed: s.gamesPlayed, wins: s.wins, avatarUrl: m.avatarUrl ?? null };
   });
   return {
     status: 'lobby',
@@ -166,7 +166,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 function toGameState(room: Room): RoomGameState {
   const players = (room.gamePlayers ?? []).map(
-    (p): PlayerPublic => ({ id: p.id, name: p.name, eliminated: p.eliminated })
+    (p): PlayerPublic => ({ id: p.id, name: p.name, eliminated: p.eliminated, avatarUrl: p.avatarUrl ?? null })
   );
   const phase = room.phase ?? 'roleReveal';
   const state: RoomGameState = {
@@ -198,7 +198,8 @@ export function createRoom(
   config: GameConfig,
   playerName: string,
   socketId: string,
-  clientSessionId?: string
+  clientSessionId?: string,
+  avatarUrl?: string | null
 ): CreateRoomResult {
   const configCheck = validateConfig(config);
   if (!configCheck.ok) return { ok: false, code: configCheck.code!, message: configCheck.message! };
@@ -211,6 +212,7 @@ export function createRoom(
     socketId,
     name: playerName.trim(),
     isHost: true,
+    avatarUrl: avatarUrl ?? null,
     ...(clientSessionId && { sessionId: clientSessionId }),
   };
   const room: Room = {
@@ -239,7 +241,8 @@ export function joinRoom(
   roomId: string,
   playerName: string,
   socketId: string,
-  clientSessionId?: string
+  clientSessionId?: string,
+  avatarUrl?: string | null
 ): JoinRoomResult {
   const nameCheck = validatePlayerName(playerName);
   if (!nameCheck.ok) return { ok: false, code: nameCheck.code!, message: nameCheck.message! };
@@ -261,6 +264,7 @@ export function joinRoom(
     socketId,
     name: playerName.trim(),
     isHost: false,
+    avatarUrl: avatarUrl ?? null,
     ...(clientSessionId && { sessionId: clientSessionId }),
   };
   room.members.push(member);
@@ -395,7 +399,8 @@ export function reconnectToRoom(
   roomId: string,
   socketId: string,
   playerSessionId: string,
-  _playerName: string
+  _playerName: string,
+  avatarUrl?: string | null
 ): ReconnectToRoomResult {
   const room = rooms.get(roomId);
   if (!room) {
@@ -408,6 +413,7 @@ export function reconnectToRoom(
       return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
     }
     member.socketId = socketId;
+    if (avatarUrl !== undefined) member.avatarUrl = avatarUrl;
     socketToRoomId.set(socketId, roomId);
     return {
       ok: true,
@@ -426,6 +432,7 @@ export function reconnectToRoom(
       return { ok: false, code: 'eliminated', message: 'Tu as été éliminé de cette partie.' };
     }
     player.socketId = socketId;
+    if (avatarUrl !== undefined) player.avatarUrl = avatarUrl;
     socketToRoomId.set(socketId, roomId);
     const privateView = getPrivateView(roomId, socketId);
     if (!privateView) {

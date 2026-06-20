@@ -17,6 +17,7 @@ export interface RoomMember {
   isHost: boolean;
   gamesPlayed?: number;
   wins?: number;
+  avatarUrl?: string | null;
 }
 
 /** État public d'une room en lobby */
@@ -43,6 +44,7 @@ export interface PlayerPublic {
   id: string;
   name: string;
   eliminated: boolean;
+  avatarUrl?: string | null;
 }
 
 /** État public d'une room en partie (reçu via game_state) */

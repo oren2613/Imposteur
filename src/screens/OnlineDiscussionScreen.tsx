@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
 import { ViewMyWordModal } from '../components/ViewMyWordModal';
+import { UserAvatar } from '../components/UserAvatar';
 
 const TICK_MS = 200;
 
@@ -92,11 +93,16 @@ export function OnlineDiscussionScreen() {
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                 En train de parler
               </p>
-              <p className="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                {currentPlayer?.name ?? '…'}
-                {currentPlayer?.name && isFriend(currentPlayer.name, friendsList) && (
-                  <Heart className="w-6 h-6 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+              <p className="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-3">
+                {currentPlayer && (
+                  <UserAvatar username={currentPlayer.name} avatarUrl={currentPlayer.avatarUrl} size="md" />
                 )}
+                <span className="inline-flex items-center gap-2">
+                  {currentPlayer?.name ?? '…'}
+                  {currentPlayer?.name && isFriend(currentPlayer.name, friendsList) && (
+                    <Heart className="w-6 h-6 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+                  )}
+                </span>
               </p>
             </div>
 
@@ -121,14 +127,7 @@ export function OnlineDiscussionScreen() {
                         ${status === 'speaking' ? 'bg-violet-100 dark:bg-violet-900/30 border-2 border-violet-400 dark:border-violet-500' : 'bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700'}
                       `}
                     >
-                      <span
-                        className={`
-                          w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0
-                          ${status === 'speaking' ? 'bg-violet-500 text-white' : status === 'passed' ? 'bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}
-                        `}
-                      >
-                        {status === 'passed' ? '✓' : idx + 1}
-                      </span>
+                      <UserAvatar username={p?.name ?? '?'} avatarUrl={p?.avatarUrl} size="sm" />
                       <span className="font-medium text-slate-800 dark:text-slate-100 inline-flex items-center gap-1">
                         {p?.name ?? '…'}
                         {p?.name && isFriend(p.name, friendsList) && (

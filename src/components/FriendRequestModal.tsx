@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from './Button';
+import { UserAvatar } from './UserAvatar';
 import { acceptFriendRequestApi, refuseFriendRequestApi } from '../api/auth';
 
 export function FriendRequestModal() {
@@ -37,6 +38,13 @@ export function FriendRequestModal() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-full">
+        <div className="flex justify-center mb-4">
+          <UserAvatar
+            username={pendingFriendRequest.fromUsername}
+            avatarUrl={pendingFriendRequest.fromAvatarUrl}
+            size="xl"
+          />
+        </div>
         <p className="text-lg font-medium text-slate-800 dark:text-slate-100 text-center mb-2">
           {pendingFriendRequest.fromUsername} veut t&apos;ajouter en ami
         </p>

@@ -14,6 +14,7 @@ import {
   type FriendRequest,
 } from '../api/auth';
 import { UserMinus, UserPlus } from 'lucide-react';
+import { UserAvatar } from '../components/UserAvatar';
 
 export function FriendsScreen() {
   const { setPhase } = useGame();
@@ -118,7 +119,10 @@ export function FriendsScreen() {
                 key={req.id}
                 className="flex items-center justify-between gap-3 py-2 px-4 rounded-xl bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800"
               >
-                <span className="font-medium text-slate-800 dark:text-slate-100">{req.fromUsername}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <UserAvatar username={req.fromUsername} avatarUrl={req.fromAvatarUrl} size="md" />
+                  <span className="font-medium text-slate-800 dark:text-slate-100 truncate">{req.fromUsername}</span>
+                </div>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -153,7 +157,10 @@ export function FriendsScreen() {
                 key={f.id}
                 className="flex items-center justify-between gap-3 py-3 px-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
               >
-                <span className="font-medium text-slate-800 dark:text-slate-100">{f.username}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <UserAvatar username={f.username} avatarUrl={f.avatarUrl} size="md" />
+                  <span className="font-medium text-slate-800 dark:text-slate-100 truncate">{f.username}</span>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleRemove(f.id)}

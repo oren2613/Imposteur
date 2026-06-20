@@ -19,6 +19,7 @@ export interface GamePlayerInternal {
   role: Role;
   word: string | null;
   eliminated: boolean;
+  avatarUrl?: string | null;
 }
 
 /** Membre lobby (pour construire les joueurs) */
@@ -26,6 +27,7 @@ interface Member {
   socketId: string;
   name: string;
   sessionId?: string;
+  avatarUrl?: string | null;
 }
 
 function shuffle<T>(array: T[]): T[] {
@@ -70,6 +72,7 @@ export function createGamePlayers(
       role,
       word,
       eliminated: false,
+      avatarUrl: m.avatarUrl ?? null,
     };
   });
 }

@@ -17,6 +17,8 @@ export interface RoomMember {
   isHost: boolean;
   /** Identifiant de session client pour reconnexion (optionnel) */
   sessionId?: string;
+  /** Photo de profil (null = avatar par défaut) */
+  avatarUrl?: string | null;
 }
 
 /** Membre tel qu'exposé dans le lobby (avec stats, sans sessionId) */
@@ -26,6 +28,7 @@ export interface LobbyMemberPublic {
   isHost: boolean;
   gamesPlayed: number;
   wins: number;
+  avatarUrl?: string | null;
 }
 
 /** État public d'une room en lobby */
@@ -59,6 +62,7 @@ export interface PlayerPublic {
   id: string;
   name: string;
   eliminated: boolean;
+  avatarUrl?: string | null;
 }
 
 /** Vue privée du joueur (mot ou null pour Mr. White) */

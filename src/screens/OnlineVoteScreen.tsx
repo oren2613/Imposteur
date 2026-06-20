@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
 import { ViewMyWordModal } from '../components/ViewMyWordModal';
+import { UserAvatar } from '../components/UserAvatar';
 
 /** Valeur envoyée au backend pour un vote blanc (personne éliminée) */
 const VOTE_BLANK = 'BLANK';
@@ -74,7 +75,8 @@ export function OnlineVoteScreen() {
                 }
               `}
             >
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-2">
+                <UserAvatar username={p.name} avatarUrl={p.avatarUrl} size="sm" />
                 {p.name}
                 {isFriend(p.name, friendsList) && (
                   <Heart className="w-4 h-4 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />

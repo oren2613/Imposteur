@@ -124,13 +124,13 @@ interface OnlineContextValue {
   /** Effacer l'erreur affichée */
   clearError: () => void;
   /** Invitation en cours (reçu via game_invite) */
-  pendingInvite: { roomId: string; hostName: string } | null;
+  pendingInvite: { roomId: string; hostName: string; hostAvatarUrl?: string | null } | null;
   /** Fermer l'invitation sans rejoindre */
   clearPendingInvite: () => void;
   /** Inviter un ami (par son userId) */
   inviteFriend: (friendUserId: number) => void;
   /** Demande d'ami reçue en temps réel (pour afficher la notification) */
-  pendingFriendRequest: { requestId: number; fromUserId: number; fromUsername: string } | null;
+  pendingFriendRequest: { requestId: number; fromUserId: number; fromUsername: string; fromAvatarUrl?: string | null } | null;
   /** Fermer la notification de demande d'ami sans accepter/refuser */
   clearPendingFriendRequest: () => void;
   /** Liste d'amis (pour afficher l'icône ami partout) */
@@ -159,11 +159,12 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [isHost, setIsHost] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [pendingInvite, setPendingInvite] = useState<{ roomId: string; hostName: string } | null>(null);
+  const [pendingInvite, setPendingInvite] = useState<{ roomId: string; hostName: string; hostAvatarUrl?: string | null } | null>(null);
   const [pendingFriendRequest, setPendingFriendRequest] = useState<{
     requestId: number;
     fromUserId: number;
     fromUsername: string;
+    fromAvatarUrl?: string | null;
   } | null>(null);
   const [friendsList, setFriendsList] = useState<Friend[]>([]);
   const [onlineFriendIds, setOnlineFriendIds] = useState<number[]>([]);
@@ -200,11 +201,15 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       if (token) socket.emit('authenticate', { token });
     });
 
-    socket.on('game_invite', (payload: { roomId: string; hostName: string }) => {
-      setPendingInvite({ roomId: payload.roomId, hostName: payload.hostName });
+    socket.on('game_invite', (payload: { roomId: string; hostName: string; hostAvatarUrl?: string | null }) => {
+      setPendingInvite({
+        roomId: payload.roomId,
+        hostName: payload.hostName,
+        hostAvatarUrl: payload.hostAvatarUrl ?? null,
+      });
     });
 
-    socket.on('friend_request', (payload: { requestId: number; fromUserId: number; fromUsername: string }) => {
+    socket.on('friend_request', (payload: { requestId: number; fromUserId: number; fromUsername: string; fromAvatarUrl?: string | null }) => {
       setPendingFriendRequest(payload);
     });
 

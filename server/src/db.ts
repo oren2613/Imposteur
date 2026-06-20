@@ -63,6 +63,11 @@ function initSqliteSchema(database: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user_id);
   `);
+  try {
+    database.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT');
+  } catch {
+    // colonne déjà présente
+  }
 }
 
 async function initPostgresSchema(pool: pg.Pool) {
@@ -93,6 +98,7 @@ async function initPostgresSchema(pool: pg.Pool) {
     );
     CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user_id);
   `);
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT');
 }
 
 export async function initDb(): Promise<void> {
@@ -119,6 +125,7 @@ export interface UserRow {
   username: string;
   password_hash: string;
   created_at: number;
+  avatar_url: string | null;
 }
 
 function mapUserRow(row: pg.QueryResultRow): UserRow {
@@ -127,7 +134,31 @@ function mapUserRow(row: pg.QueryResultRow): UserRow {
     username: String(row.username),
     password_hash: String(row.password_hash),
     created_at: Number(row.created_at),
+    avatar_url: row.avatar_url != null ? String(row.avatar_url) : null,
   };
+}
+
+function mapSqliteUserRow(row: Record<string, unknown>): UserRow {
+  return {
+    id: Number(row.id),
+    username: String(row.username),
+    password_hash: String(row.password_hash),
+    created_at: Number(row.created_at),
+    avatar_url: row.avatar_url != null ? String(row.avatar_url) : null,
+  };
+}
+
+export async function updateUserAvatar(userId: number, avatarUrl: string | null): Promise<UserRow | null> {
+  if (usePostgres) {
+    const result = await getPgPool().query(
+      'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING *',
+      [avatarUrl, userId]
+    );
+    return result.rows[0] ? mapUserRow(result.rows[0]) : null;
+  }
+  getSqliteDb().prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarUrl, userId);
+  const row = getSqliteDb().prepare('SELECT * FROM users WHERE id = ?').get(userId) as Record<string, unknown> | undefined;
+  return row ? mapSqliteUserRow(row) : null;
 }
 
 export async function findUserById(id: number): Promise<UserRow | null> {
@@ -135,7 +166,8 @@ export async function findUserById(id: number): Promise<UserRow | null> {
     const result = await getPgPool().query('SELECT * FROM users WHERE id = $1', [id]);
     return result.rows[0] ? mapUserRow(result.rows[0]) : null;
   }
-  return getSqliteDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | null;
+  const row = getSqliteDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? mapSqliteUserRow(row) : null;
 }
 
 export async function findUserByUsername(username: string): Promise<UserRow | null> {
@@ -154,11 +186,11 @@ export async function findUserByUsername(username: string): Promise<UserRow | nu
   }
 
   const db = getSqliteDb();
-  let row = db.prepare('SELECT * FROM users WHERE username = ?').get(trimmed) as UserRow | null;
-  if (row) return row;
+  let row = db.prepare('SELECT * FROM users WHERE username = ?').get(trimmed) as Record<string, unknown> | undefined;
+  if (row) return mapSqliteUserRow(row);
   const norm = trimmed.toLowerCase();
-  row = db.prepare('SELECT * FROM users WHERE lower(trim(username)) = ?').get(norm) as UserRow | null;
-  return row;
+  row = db.prepare('SELECT * FROM users WHERE lower(trim(username)) = ?').get(norm) as Record<string, unknown> | undefined;
+  return row ? mapSqliteUserRow(row) : null;
 }
 
 export async function createUser(username: string, passwordHash: string): Promise<UserRow> {
@@ -185,7 +217,8 @@ export async function createUser(username: string, passwordHash: string): Promis
   const d = getSqliteDb();
   try {
     const result = d.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(name, passwordHash);
-    return d.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid) as UserRow;
+    const row = d.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid) as Record<string, unknown>;
+    return mapSqliteUserRow(row);
   } catch (e: unknown) {
     if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
       throw new Error('USERNAME_TAKEN');
@@ -194,21 +227,30 @@ export async function createUser(username: string, passwordHash: string): Promis
   }
 }
 
-export async function listFriends(userId: number): Promise<{ id: number; username: string }[]> {
+export async function listFriends(userId: number): Promise<{ id: number; username: string; avatarUrl: string | null }[]> {
   const query = `
-    SELECT u.id, u.username FROM users u
+    SELECT u.id, u.username, u.avatar_url FROM users u
     INNER JOIN friends f ON (f.friend_id = u.id AND f.user_id = $1) OR (f.user_id = u.id AND f.friend_id = $1)
   `;
 
   if (usePostgres) {
-    const result = await getPgPool().query(query.replace(/\$1/g, '$1'), [userId]);
-    return result.rows.map((row) => ({ id: Number(row.id), username: String(row.username) }));
+    const result = await getPgPool().query(query, [userId]);
+    return result.rows.map((row) => ({
+      id: Number(row.id),
+      username: String(row.username),
+      avatarUrl: row.avatar_url != null ? String(row.avatar_url) : null,
+    }));
   }
 
-  return getSqliteDb().prepare(`
-    SELECT u.id, u.username FROM users u
+  const rows = getSqliteDb().prepare(`
+    SELECT u.id, u.username, u.avatar_url FROM users u
     INNER JOIN friends f ON (f.friend_id = u.id AND f.user_id = ?) OR (f.user_id = u.id AND f.friend_id = ?)
-  `).all(userId, userId) as { id: number; username: string }[];
+  `).all(userId, userId) as { id: number; username: string; avatar_url: string | null }[];
+  return rows.map((row) => ({
+    id: row.id,
+    username: row.username,
+    avatarUrl: row.avatar_url ?? null,
+  }));
 }
 
 /** IDs des utilisateurs qui ont userId dans leur liste d'amis (pour notifier présence en ligne) */
@@ -231,7 +273,7 @@ export async function listUserIdsWhoHaveAsFriend(userId: number): Promise<number
 }
 
 export type AddFriendResult =
-  | { ok: true; friend: { id: number; username: string } }
+  | { ok: true; friend: { id: number; username: string; avatarUrl: string | null } }
   | { ok: false; code: 'not_found' | 'self' | 'already_friends' };
 
 export async function addFriend(userId: number, friendUsername: string): Promise<AddFriendResult> {
@@ -244,10 +286,10 @@ export async function addFriend(userId: number, friendUsername: string): Promise
   if (usePostgres) {
     try {
       await getPgPool().query('INSERT INTO friends (user_id, friend_id) VALUES ($1, $2)', [a, b]);
-      return { ok: true, friend: { id: friend.id, username: friend.username } };
+      return { ok: true, friend: { id: friend.id, username: friend.username, avatarUrl: friend.avatar_url ?? null } };
     } catch (e: unknown) {
       if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505') {
-        return { ok: true, friend: { id: friend.id, username: friend.username } };
+        return { ok: true, friend: { id: friend.id, username: friend.username, avatarUrl: friend.avatar_url ?? null } };
       }
       throw e;
     }
@@ -255,10 +297,10 @@ export async function addFriend(userId: number, friendUsername: string): Promise
 
   try {
     getSqliteDb().prepare('INSERT INTO friends (user_id, friend_id) VALUES (?, ?)').run(a, b);
-    return { ok: true, friend: { id: friend.id, username: friend.username } };
+    return { ok: true, friend: { id: friend.id, username: friend.username, avatarUrl: friend.avatar_url ?? null } };
   } catch (e: unknown) {
     if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
-      return { ok: true, friend: { id: friend.id, username: friend.username } };
+      return { ok: true, friend: { id: friend.id, username: friend.username, avatarUrl: friend.avatar_url ?? null } };
     }
     throw e;
   }
@@ -340,9 +382,9 @@ export async function createFriendRequest(fromUserId: number, toUsername: string
 
 export async function listPendingFriendRequests(
   toUserId: number
-): Promise<{ id: number; fromUserId: number; fromUsername: string }[]> {
+): Promise<{ id: number; fromUserId: number; fromUsername: string; fromAvatarUrl: string | null }[]> {
   const query = `
-    SELECT r.id, r.from_user_id AS "fromUserId", u.username AS "fromUsername"
+    SELECT r.id, r.from_user_id AS "fromUserId", u.username AS "fromUsername", u.avatar_url AS "fromAvatarUrl"
     FROM friend_requests r
     INNER JOIN users u ON u.id = r.from_user_id
     WHERE r.to_user_id = $1
@@ -355,16 +397,17 @@ export async function listPendingFriendRequests(
       id: Number(row.id),
       fromUserId: Number(row.fromUserId),
       fromUsername: String(row.fromUsername),
+      fromAvatarUrl: row.fromAvatarUrl != null ? String(row.fromAvatarUrl) : null,
     }));
   }
 
   return getSqliteDb().prepare(`
-    SELECT r.id, r.from_user_id AS fromUserId, u.username AS fromUsername
+    SELECT r.id, r.from_user_id AS fromUserId, u.username AS fromUsername, u.avatar_url AS fromAvatarUrl
     FROM friend_requests r
     INNER JOIN users u ON u.id = r.from_user_id
     WHERE r.to_user_id = ?
     ORDER BY r.created_at DESC
-  `).all(toUserId) as { id: number; fromUserId: number; fromUsername: string }[];
+  `).all(toUserId) as { id: number; fromUserId: number; fromUsername: string; fromAvatarUrl: string | null }[];
 }
 
 export async function getFriendRequestById(id: number, toUserId: number): Promise<FriendRequestRow | null> {
@@ -389,7 +432,7 @@ export async function getFriendRequestById(id: number, toUserId: number): Promis
 export async function acceptFriendRequest(
   requestId: number,
   toUserId: number
-): Promise<{ id: number; username: string } | null> {
+): Promise<{ id: number; username: string; avatarUrl: string | null } | null> {
   const req = await getFriendRequestById(requestId, toUserId);
   if (!req) return null;
   const a = Math.min(req.from_user_id, req.to_user_id);
@@ -403,14 +446,14 @@ export async function acceptFriendRequest(
     );
     await pool.query('DELETE FROM friend_requests WHERE id = $1', [requestId]);
     const fromUser = await findUserById(req.from_user_id);
-    return fromUser ? { id: fromUser.id, username: fromUser.username } : null;
+    return fromUser ? { id: fromUser.id, username: fromUser.username, avatarUrl: fromUser.avatar_url ?? null } : null;
   }
 
   const d = getSqliteDb();
   d.prepare('INSERT OR IGNORE INTO friends (user_id, friend_id) VALUES (?, ?)').run(a, b);
   d.prepare('DELETE FROM friend_requests WHERE id = ?').run(requestId);
   const fromUser = await findUserById(req.from_user_id);
-  return fromUser ? { id: fromUser.id, username: fromUser.username } : null;
+  return fromUser ? { id: fromUser.id, username: fromUser.username, avatarUrl: fromUser.avatar_url ?? null } : null;
 }
 
 export async function refuseFriendRequest(requestId: number, toUserId: number): Promise<boolean> {

@@ -19,6 +19,7 @@ function clearToken() {
 export interface User {
   id: number;
   username: string;
+  avatarUrl?: string | null;
 }
 
 export interface AuthResponse {
@@ -59,6 +60,31 @@ export async function fetchMe(): Promise<User | null> {
   return data.user ?? null;
 }
 
+export async function uploadAvatarApi(avatarDataUrl: string): Promise<User> {
+  const token = getToken();
+  if (!token) throw new Error('Non connecté');
+  const res = await fetch(`${API_BASE}/auth/me/avatar`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ avatarDataUrl }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? 'Impossible de mettre à jour la photo');
+  return data.user;
+}
+
+export async function removeAvatarApi(): Promise<User> {
+  const token = getToken();
+  if (!token) throw new Error('Non connecté');
+  const res = await fetch(`${API_BASE}/auth/me/avatar`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? 'Impossible de supprimer la photo');
+  return data.user;
+}
+
 export { getToken, setToken, clearToken };
 
 // --- Amis
@@ -66,6 +92,7 @@ export { getToken, setToken, clearToken };
 export interface Friend {
   id: number;
   username: string;
+  avatarUrl?: string | null;
 }
 
 export async function fetchFriends(): Promise<Friend[]> {
@@ -111,6 +138,7 @@ export interface FriendRequest {
   id: number;
   fromUserId: number;
   fromUsername: string;
+  fromAvatarUrl?: string | null;
 }
 
 export async function sendFriendRequestApi(username: string): Promise<{ requestId: number }> {

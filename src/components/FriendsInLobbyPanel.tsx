@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
 import type { Friend } from '../api/auth';
 import { ChevronDown, ChevronUp, UserPlus } from 'lucide-react';
+import { UserAvatar } from './UserAvatar';
 
 interface FriendsInLobbyPanelProps {
   /** Membres actuellement dans la room (pour masquer le bouton inviter si déjà dedans) */
@@ -120,6 +121,7 @@ export function FriendsInLobbyPanel({
                       }`}
                       aria-hidden
                     />
+                    <UserAvatar username={f.username} avatarUrl={f.avatarUrl} size="sm" />
                     <span className="text-slate-800 dark:text-slate-100 truncate font-medium">
                       {f.username}
                     </span>
