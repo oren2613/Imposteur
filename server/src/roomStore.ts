@@ -20,7 +20,7 @@ import { startGameLogic, checkVictoryAfterElimination } from './gameLogic.js';
 import {
   getMaxImpostors,
   shouldContinueAfterImpostorEliminated,
-} from '../../shared/gameLogic.js';
+} from '../shared/gameLogic.js';
 
 /** Stats par sessionId (persistantes sur la room) */
 interface PlayerStats {

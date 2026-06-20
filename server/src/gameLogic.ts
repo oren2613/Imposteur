@@ -6,12 +6,12 @@ import type { GameConfig, WordPair } from './types.js';
 import {
   buildRoles,
   checkVictoryAfterElimination,
-} from '../../shared/gameLogic.js';
-import type { Role } from '../../shared/types.js';
-import { getRandomWordPair } from '../../shared/wordPairs.js';
+} from '../shared/gameLogic.js';
+import type { Role } from '../shared/types.js';
+import { getRandomWordPair } from '../shared/wordPairs.js';
 
-export type { VictoryResult } from '../../shared/gameLogic.js';
-export { checkVictoryAfterElimination } from '../../shared/gameLogic.js';
+export type { VictoryResult } from '../shared/gameLogic.js';
+export { checkVictoryAfterElimination } from '../shared/gameLogic.js';
 
 /** Joueur interne (avec rôle et mot, jamais exposé tel quel au client) */
 export interface GamePlayerInternal {
