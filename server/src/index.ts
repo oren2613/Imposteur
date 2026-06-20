@@ -4,6 +4,9 @@
  */
 
 import { createServer } from 'node:http';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { Server } from 'socket.io';
@@ -283,6 +286,28 @@ app.post('/friend_requests/:id/refuse', authMiddleware, async (req, res) => {
   }
   res.json({ ok: true });
 });
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const clientDistDir = path.join(__dirname, '..', 'public');
+
+/** Anciens liens /join/CODE → redirection vers l'app React */
+app.get('/join/:code', (req, res) => {
+  const raw = typeof req.params.code === 'string' ? req.params.code.trim().toUpperCase() : '';
+  res.redirect(302, raw ? `/?room=${encodeURIComponent(raw)}` : '/');
+});
+
+if (fs.existsSync(clientDistDir)) {
+  app.use(express.static(clientDistDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/socket.io')) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(clientDistDir, 'index.html'), (err) => {
+      if (err) next(err);
+    });
+  });
+}
 
 const httpServer = createServer(app);
 
@@ -821,7 +846,8 @@ setInterval(() => {
 async function startServer() {
   await initDb();
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`Serveur prêt sur http://0.0.0.0:${PORT} (${process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite'})`);
+    const client = fs.existsSync(clientDistDir) ? ' + frontend' : '';
+    console.log(`Serveur prêt sur http://0.0.0.0:${PORT} (${process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite'}${client})`);
   });
 }
 

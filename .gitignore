@@ -31,3 +31,6 @@ docs/
 # SQLite DB (mode en ligne)
 server/data/
 
+# Frontend build copié pour la prod (server/public)
+server/public/
+

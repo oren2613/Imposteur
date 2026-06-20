@@ -40,5 +40,5 @@ export function clearRoomInviteFromUrl(): void {
 export function buildRoomInviteLink(roomId: string, origin: string = window.location.origin): string {
   const code = normalizeRoomCode(roomId);
   if (!code) throw new Error('Code de room invalide');
-  return `${origin.replace(/\/$/, '')}/join/${code}`;
+  return `${origin.replace(/\/$/, '')}/?room=${code}`;
 }

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:client && tsc",
+    "build:client": "cd .. && npm ci && npm run build && rm -rf server/public && cp -r dist server/public",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts"
   },

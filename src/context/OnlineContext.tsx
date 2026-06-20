@@ -25,7 +25,9 @@ import type {
 } from '../types/online';
 import { clearRoomInviteFromUrl, parseRoomCodeFromUrl } from '../utils/roomInviteLink';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:3001';
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL
+  ?? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
 const SESSION_STORAGE_KEY = 'imposteur_online_session';
 
 interface StoredSession {

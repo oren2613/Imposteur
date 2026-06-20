@@ -2,7 +2,10 @@
  * Appels API auth et amis (REST).
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:3001';
+const API_BASE =
+  import.meta.env.VITE_API_URL
+  ?? import.meta.env.VITE_SOCKET_URL
+  ?? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
 
 function getToken(): string | null {
   return localStorage.getItem('imposteur_token');
