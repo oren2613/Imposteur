@@ -103,6 +103,15 @@ interface OnlineContextValue {
   createRoom: (playerName: string) => void;
   /** Rejoindre une room par code */
   joinRoom: (roomId: string, playerName: string) => void;
+  /** Rechercher une partie (matchmaking) */
+  joinMatchmaking: (playerName: string) => void;
+  /** Annuler la recherche de partie */
+  leaveMatchmaking: () => void;
+  /** True pendant une recherche matchmaking */
+  isMatchmaking: boolean;
+  /** Joueurs déjà en file / cible pour former une room */
+  matchmakingQueueSize: number;
+  matchmakingTargetSize: number;
   /** Code room extrait d'un lien d'invitation (?room= ou /join/CODE) */
   inviteLinkRoomCode: string | null;
   /** Effacer le code extrait d'un lien d'invitation */
@@ -174,6 +183,9 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [onlineFriendIds, setOnlineFriendIds] = useState<number[]>([]);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteLinkRoomCode, setInviteLinkRoomCode] = useState<string | null>(null);
+  const [isMatchmaking, setIsMatchmaking] = useState(false);
+  const [matchmakingQueueSize, setMatchmakingQueueSize] = useState(0);
+  const [matchmakingTargetSize, setMatchmakingTargetSize] = useState(4);
   const socketRef = useRef<Socket | null>(null);
   const inviteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
@@ -248,6 +260,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setPendingInvite(null);
       clearErrorTimeout();
       setError(null);
+      setIsMatchmaking(false);
+      setMatchmakingQueueSize(0);
       const prev = getStoredSession();
       if (prev) saveSession(prev.playerSessionId, payload.roomId, prev.playerName);
       setRoomId(payload.roomId);
@@ -264,6 +278,10 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       clearErrorTimeout();
       setError(null);
       setPendingInvite(null);
+      setIsMatchmaking(false);
+      setMatchmakingQueueSize(0);
+      const prevJoin = getStoredSession();
+      if (prevJoin) saveSession(prevJoin.playerSessionId, payload.roomId, prevJoin.playerName);
       setRoomId(payload.roomId);
       setRoomState(payload.roomState);
       setIsHost(payload.youAreHost);
@@ -305,11 +323,30 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setMyWord(null);
       setMyPlayerId(null);
       setRoomId(null);
+      setIsMatchmaking(false);
+      setMatchmakingQueueSize(0);
       socketRef.current = null;
       socket.disconnect();
       socket.removeAllListeners();
       setPhase('home');
     });
+
+    socket.on(
+      'matchmaking_update',
+      (payload: { searching?: boolean; queueSize?: number; targetSize?: number }) => {
+        const searching = payload.searching === true;
+        setIsMatchmaking(searching);
+        if (typeof payload.queueSize === 'number') {
+          setMatchmakingQueueSize(payload.queueSize);
+        }
+        if (typeof payload.targetSize === 'number') {
+          setMatchmakingTargetSize(payload.targetSize);
+        }
+        if (!searching) {
+          setMatchmakingQueueSize(0);
+        }
+      }
+    );
 
     socket.on('error', (payload: { code: string; message: string }) => {
       if (reconnectingRef.current) {
@@ -346,6 +383,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     setRoomId(null);
     setIsHost(false);
     setError(null);
+    setIsMatchmaking(false);
+    setMatchmakingQueueSize(0);
   }, [clearErrorTimeout]);
 
   useEffect(() => {
@@ -429,6 +468,31 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     },
     [connect]
   );
+
+  const joinMatchmaking = useCallback(
+    (playerName: string) => {
+      setError(null);
+      const playerSessionId = generateSessionId();
+      saveSession(playerSessionId, '', playerName);
+      const socket = connect();
+      const token = getToken();
+      setIsMatchmaking(true);
+      socket.emit('join_matchmaking', {
+        playerName,
+        clientSessionId: playerSessionId,
+        ...(token && { authToken: token }),
+      });
+    },
+    [connect]
+  );
+
+  const leaveMatchmaking = useCallback(() => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('leave_matchmaking');
+    }
+    setIsMatchmaking(false);
+    setMatchmakingQueueSize(0);
+  }, []);
 
   const leaveRoom = useCallback(() => {
     clearStoredSession();
@@ -559,6 +623,11 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       myStats,
       createRoom,
       joinRoom,
+      joinMatchmaking,
+      leaveMatchmaking,
+      isMatchmaking,
+      matchmakingQueueSize,
+      matchmakingTargetSize,
       inviteLinkRoomCode,
       clearInviteLinkRoomCode,
       leaveRoom,
@@ -599,8 +668,13 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       onlineFriendIds,
       inviteError,
       inviteLinkRoomCode,
+      isMatchmaking,
+      matchmakingQueueSize,
+      matchmakingTargetSize,
       createRoom,
       joinRoom,
+      joinMatchmaking,
+      leaveMatchmaking,
       clearInviteLinkRoomCode,
       leaveRoom,
       startGame,

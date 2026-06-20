@@ -34,6 +34,14 @@ import {
   getRoomHostName,
   relayVoiceSignal,
 } from './roomStore.js';
+import {
+  addToMatchmakingQueue,
+  removeFromMatchmakingQueue,
+  tryFormMatchmaking,
+  getAllMatchmakingSocketIds,
+  getMatchmakingQueueSize,
+  MATCH_TARGET,
+} from './matchmaking.js';
 import type {
   CreateRoomPayload,
   JoinRoomPayload,
@@ -342,6 +350,21 @@ function isJoinRoomPayload(p: unknown): p is JoinRoomPayload {
   );
 }
 
+interface JoinMatchmakingPayload {
+  playerName: string;
+  clientSessionId?: string;
+  authToken?: string;
+}
+
+function isJoinMatchmakingPayload(p: unknown): p is JoinMatchmakingPayload {
+  return (
+    p !== null &&
+    typeof p === 'object' &&
+    'playerName' in p &&
+    typeof (p as JoinMatchmakingPayload).playerName === 'string'
+  );
+}
+
 function isReconnectToRoomPayload(p: unknown): p is ReconnectToRoomPayload {
   return (
     p !== null &&
@@ -370,6 +393,45 @@ function isUpdateRoomConfigPayload(p: unknown): p is UpdateRoomConfigPayload {
 function emitError(socket: import('socket.io').Socket, code: string, message: string) {
   const payload: ErrorPayload = { code, message };
   socket.emit('error', payload);
+}
+
+function broadcastMatchmakingUpdate(): void {
+  const queueSize = getMatchmakingQueueSize();
+  for (const socketId of getAllMatchmakingSocketIds()) {
+    io.to(socketId).emit('matchmaking_update', {
+      searching: true,
+      queueSize,
+      targetSize: MATCH_TARGET,
+    });
+  }
+}
+
+async function applyMatchmakingMatch(
+  match: ReturnType<typeof tryFormMatchmaking>
+): Promise<void> {
+  if (!match) return;
+  const finalRoomState = match.players[match.players.length - 1]?.roomState;
+  for (const player of match.players) {
+    const peer = io.sockets.sockets.get(player.socketId);
+    if (!peer) continue;
+    peer.join(match.roomId);
+    if (player.isHost) {
+      peer.emit('room_created', {
+        roomId: match.roomId,
+        roomState: player.roomState,
+      });
+    } else {
+      peer.emit('room_joined', {
+        roomId: match.roomId,
+        roomState: player.roomState,
+        youAreHost: false,
+      });
+    }
+    peer.emit('matchmaking_update', { searching: false, queueSize: 0, targetSize: MATCH_TARGET });
+  }
+  if (finalRoomState) {
+    io.to(match.roomId).emit('room_state', { roomState: finalRoomState });
+  }
 }
 
 async function associateSocketWithUser(socket: import('socket.io').Socket, authToken: string | undefined): Promise<void> {
@@ -510,6 +572,58 @@ io.on('connection', (socket) => {
         roomState: result.roomState,
       });
     })();
+  });
+
+  socket.on('join_matchmaking', (payload: unknown) => {
+    if (!isJoinMatchmakingPayload(payload)) {
+      emitError(socket, 'invalid_payload', 'Payload join_matchmaking invalide');
+      return;
+    }
+
+    void (async () => {
+      const authToken =
+        payload.authToken && typeof payload.authToken === 'string'
+          ? payload.authToken
+          : undefined;
+      const avatarUrl = await getAvatarUrlFromAuthToken(authToken);
+      const result = addToMatchmakingQueue(
+        socket.id,
+        payload.playerName,
+        payload.clientSessionId,
+        avatarUrl
+      );
+      if (!result.ok) {
+        emitError(socket, result.code, result.message);
+        return;
+      }
+
+      await associateSocketWithUser(socket, authToken);
+      const uid = socketToUserId.get(socket.id);
+      if (uid != null) void broadcastFriendStatus(uid, true);
+
+      socket.emit('matchmaking_update', {
+        searching: true,
+        queueSize: result.queueSize,
+        targetSize: result.targetSize,
+      });
+      broadcastMatchmakingUpdate();
+
+      const match = tryFormMatchmaking();
+      await applyMatchmakingMatch(match);
+      if (match) {
+        broadcastMatchmakingUpdate();
+      }
+    })();
+  });
+
+  socket.on('leave_matchmaking', () => {
+    removeFromMatchmakingQueue(socket.id);
+    socket.emit('matchmaking_update', {
+      searching: false,
+      queueSize: 0,
+      targetSize: MATCH_TARGET,
+    });
+    broadcastMatchmakingUpdate();
   });
 
   socket.on('join_room', (payload: unknown) => {
@@ -817,6 +931,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    removeFromMatchmakingQueue(socket.id);
+    broadcastMatchmakingUpdate();
     const uid = socketToUserId.get(socket.id);
     if (uid != null) {
       void broadcastFriendStatus(uid, false);
