@@ -7,7 +7,7 @@ import { Layout } from '../components/Layout';
 
 export function OnlineCreateOrJoinScreen() {
   const { setPhase } = useGame();
-  const { createRoom, joinRoom, error, clearError } = useOnline();
+  const { createRoom, joinRoom, error, clearError, inviteLinkRoomCode, clearInviteLinkRoomCode } = useOnline();
   const { user } = useAuth();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
@@ -15,6 +15,10 @@ export function OnlineCreateOrJoinScreen() {
   useEffect(() => {
     if (user?.username && !playerName) setPlayerName(user.username);
   }, [user?.username, playerName]);
+
+  useEffect(() => {
+    if (inviteLinkRoomCode) setRoomCode(inviteLinkRoomCode);
+  }, [inviteLinkRoomCode]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,16 +32,24 @@ export function OnlineCreateOrJoinScreen() {
     const name = playerName.trim();
     const code = roomCode.trim().toUpperCase();
     if (!name || !code) return;
+    clearInviteLinkRoomCode();
     joinRoom(code, name);
   };
 
   return (
     <Layout
       title="Jouer en ligne"
-      onBack={() => { clearError(); setPhase('home'); }}
+      onBack={() => { clearError(); clearInviteLinkRoomCode(); setPhase('home'); }}
       backLabel="Accueil"
     >
       <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+        {inviteLinkRoomCode && (
+          <div className="text-sm text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-800 p-3 rounded-xl">
+            Tu as reçu une invitation pour rejoindre la room{' '}
+            <span className="font-mono font-semibold">{inviteLinkRoomCode}</span>.
+            Entre ton pseudo puis rejoins la partie.
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
             Ton pseudo

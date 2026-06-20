@@ -6,8 +6,9 @@ import { Layout } from '../components/Layout';
 import { RoomConfigForm } from '../components/RoomConfigForm';
 import { FriendsInLobbyPanel } from '../components/FriendsInLobbyPanel';
 import { sendFriendRequestApi } from '../api/auth';
+import { buildRoomInviteLink } from '../utils/roomInviteLink';
 import type { OnlineGameConfig } from '../types/online';
-import { Heart } from 'lucide-react';
+import { Heart, Link2 } from 'lucide-react';
 
 export function OnlineLobbyScreen() {
   const { roomState, roomId, isHost, error, leaveRoom, startGame, updateRoomConfig, clearError, friendsList, loadFriends, fetchOnlineFriends } = useOnline();
@@ -15,6 +16,7 @@ export function OnlineLobbyScreen() {
   const [inviteSentFriendId, setInviteSentFriendId] = useState<number | null>(null);
   const [friendRequestSent, setFriendRequestSent] = useState<string | null>(null);
   const [friendRequestError, setFriendRequestError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -44,6 +46,17 @@ export function OnlineLobbyScreen() {
     updateRoomConfig(newConfig);
   };
 
+  const handleCopyInviteLink = async () => {
+    if (!roomId) return;
+    try {
+      await navigator.clipboard.writeText(buildRoomInviteLink(roomId));
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      window.prompt('Copie ce lien pour inviter des joueurs :', buildRoomInviteLink(roomId));
+    }
+  };
+
   return (
     <Layout
       title="Lobby"
@@ -58,9 +71,18 @@ export function OnlineLobbyScreen() {
           <p className="text-2xl font-mono font-bold text-slate-800 dark:text-slate-100 tracking-wider">
             {roomId}
           </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Partager ce code pour inviter des joueurs
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-3">
+            Partage le code ou le lien d&apos;invitation pour inviter des joueurs
           </p>
+          <Button
+            fullWidth
+            variant="secondary"
+            size="md"
+            onClick={handleCopyInviteLink}
+          >
+            <Link2 className="w-4 h-4" />
+            {linkCopied ? 'Lien copié !' : 'Copier le lien d\'invitation'}
+          </Button>
         </div>
 
         {error && (

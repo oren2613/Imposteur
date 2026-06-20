@@ -23,6 +23,7 @@ import type {
   OnlineGameConfig,
   YourRolePayload as OnlineYourRolePayload,
 } from '../types/online';
+import { clearRoomInviteFromUrl, parseRoomCodeFromUrl } from '../utils/roomInviteLink';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:3001';
 const SESSION_STORAGE_KEY = 'imposteur_online_session';
@@ -100,6 +101,10 @@ interface OnlineContextValue {
   createRoom: (playerName: string) => void;
   /** Rejoindre une room par code */
   joinRoom: (roomId: string, playerName: string) => void;
+  /** Code room extrait d'un lien d'invitation (?room= ou /join/CODE) */
+  inviteLinkRoomCode: string | null;
+  /** Effacer le code extrait d'un lien d'invitation */
+  clearInviteLinkRoomCode: () => void;
   /** Quitter le lobby (déconnexion socket + retour accueil) */
   leaveRoom: () => void;
   /** Lancer la partie (host uniquement, émet start_game) */
@@ -163,6 +168,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [friendsList, setFriendsList] = useState<Friend[]>([]);
   const [onlineFriendIds, setOnlineFriendIds] = useState<number[]>([]);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteLinkRoomCode, setInviteLinkRoomCode] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const inviteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
@@ -340,6 +346,14 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   }, [disconnect]);
 
   useEffect(() => {
+    const code = parseRoomCodeFromUrl();
+    if (!code) return;
+    setInviteLinkRoomCode(code);
+    setPhase('onlineCreateOrJoin');
+    clearRoomInviteFromUrl();
+  }, [setPhase]);
+
+  useEffect(() => {
     const session = getStoredSession();
     if (!session?.roomId || !session.playerSessionId || !session.playerName) return;
     reconnectingRef.current = true;
@@ -465,6 +479,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   const clearPendingInvite = useCallback(() => setPendingInvite(null), []);
 
+  const clearInviteLinkRoomCode = useCallback(() => setInviteLinkRoomCode(null), []);
+
   const clearPendingFriendRequest = useCallback(() => setPendingFriendRequest(null), []);
 
   const loadFriends = useCallback(async () => {
@@ -532,6 +548,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       myStats,
       createRoom,
       joinRoom,
+      inviteLinkRoomCode,
+      clearInviteLinkRoomCode,
       leaveRoom,
       startGame,
       discussionPass,
@@ -568,8 +586,10 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       friendsList,
       onlineFriendIds,
       inviteError,
+      inviteLinkRoomCode,
       createRoom,
       joinRoom,
+      clearInviteLinkRoomCode,
       leaveRoom,
       startGame,
       discussionPass,
