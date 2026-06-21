@@ -7,6 +7,8 @@ import {
   joinRoom,
   getRoomIdBySocket,
   validatePlayerName,
+  addBotToRoom,
+  getLobbyState,
 } from './roomStore.js';
 import type { GameConfig, RoomLobbyState } from './types.js';
 
@@ -16,8 +18,12 @@ export const MATCH_MIN = 3;
 export const MATCH_PREFERRED = 4;
 /** @deprecated alias */
 export const MATCH_TARGET = MATCH_PREFERRED;
-/** Délai avant match à 3 joueurs si la 4e personne n'arrive pas */
+/** Délai avant complétion par des bots quand il manque peu de monde (3 joueurs en attente) */
 export const MATCH_TIMEOUT_MS = 20_000;
+/** Délai plus long avant de compléter par des bots quand il manque beaucoup de monde (1-2 joueurs) */
+export const BOT_BACKFILL_TIMEOUT_MS = Number(process.env.BOT_BACKFILL_TIMEOUT_MS) || 35_000;
+/** Activation des joueurs IA (compléter le matchmaking). Désactivable via BOTS_ENABLED=0. */
+export const BOTS_ENABLED = process.env.BOTS_ENABLED !== '0';
 
 interface QueueEntry {
   socketId: string;
@@ -51,18 +57,24 @@ function clearMatchTimer(): void {
   matchTimeoutAt = null;
 }
 
-/** Planifie un match à MATCH_MIN joueurs si personne d'autre n'arrive. */
+/**
+ * Planifie la formation d'une room quand l'attente devient trop longue.
+ * Avec les bots activés : on programme dès 1 joueur (délai plus long en dessous de
+ * MATCH_MIN) afin de compléter par des bots. Sans bots : comportement historique
+ * (uniquement à partir de MATCH_MIN, match humain forcé).
+ */
 export function scheduleMatchmakingTimeout(): number | null {
   if (matchTimer) return matchTimeoutAt;
-  if (queue.length >= MATCH_PREFERRED || queue.length < MATCH_MIN) {
-    return null;
-  }
-  matchTimeoutAt = Date.now() + MATCH_TIMEOUT_MS;
+  if (queue.length >= MATCH_PREFERRED) return null;
+  const minToSchedule = BOTS_ENABLED ? 1 : MATCH_MIN;
+  if (queue.length < minToSchedule) return null;
+  const delay = queue.length >= MATCH_MIN ? MATCH_TIMEOUT_MS : BOT_BACKFILL_TIMEOUT_MS;
+  matchTimeoutAt = Date.now() + delay;
   matchTimer = setTimeout(() => {
     matchTimer = null;
     matchTimeoutAt = null;
     onTimeoutMatch?.();
-  }, MATCH_TIMEOUT_MS);
+  }, delay);
   return matchTimeoutAt;
 }
 
@@ -123,10 +135,8 @@ export function addToMatchmakingQueue(
   let timeoutAt: number | null = null;
   if (queue.length >= MATCH_PREFERRED) {
     clearMatchTimer();
-  } else if (queue.length >= MATCH_MIN) {
-    timeoutAt = scheduleMatchmakingTimeout();
   } else {
-    clearMatchTimer();
+    timeoutAt = scheduleMatchmakingTimeout();
   }
 
   return {
@@ -142,10 +152,10 @@ export function removeFromMatchmakingQueue(socketId: string): boolean {
   const idx = queue.findIndex((e) => e.socketId === socketId);
   if (idx === -1) return false;
   queue.splice(idx, 1);
-  if (queue.length >= MATCH_MIN && queue.length < MATCH_PREFERRED) {
-    scheduleMatchmakingTimeout();
-  } else {
+  if (queue.length === 0 || queue.length >= MATCH_PREFERRED) {
     clearMatchTimer();
+  } else {
+    scheduleMatchmakingTimeout();
   }
   return true;
 }
@@ -160,15 +170,21 @@ export interface MatchedPlayer {
 export interface MatchmakingFormedMatch {
   roomId: string;
   players: MatchedPlayer[];
+  /** État final du lobby (avec d'éventuels bots ajoutés), pour le room_state diffusé. */
+  finalRoomState: RoomLobbyState;
 }
 
-function formMatchWithCount(count: number): MatchmakingFormedMatch | null {
-  if (queue.length < count || count < MATCH_MIN) return null;
+/**
+ * Forme une room avec `humanCount` joueurs de la file et complète jusqu'à
+ * `targetSize` avec des bots (0 bot si humanCount === targetSize).
+ */
+function formMatch(humanCount: number, targetSize: number): MatchmakingFormedMatch | null {
+  if (queue.length < humanCount || humanCount < 1) return null;
 
   clearMatchTimer();
-  const group = queue.splice(0, count);
+  const group = queue.splice(0, humanCount);
   const [host, ...rest] = group;
-  const config = buildConfigForCount(count);
+  const config = buildConfigForCount(targetSize);
 
   const createResult = createRoom(
     config,
@@ -212,20 +228,39 @@ function formMatchWithCount(count: number): MatchmakingFormedMatch | null {
     });
   }
 
-  if (players.length < MATCH_MIN) {
+  if (players.length < 1) {
     return null;
   }
 
-  return { roomId: createResult.roomId, players };
+  // Compléter avec des bots jusqu'à la taille cible.
+  const botsToAdd = Math.max(0, targetSize - players.length);
+  for (let i = 0; i < botsToAdd; i++) {
+    const result = addBotToRoom(createResult.roomId);
+    if (!result.ok) break;
+  }
+
+  const finalRoomState = getLobbyState(createResult.roomId) ?? createResult.roomState;
+  return { roomId: createResult.roomId, players, finalRoomState };
 }
 
-/** Match immédiat à 4 joueurs, ou à 3+ si forceMin (timeout). */
-export function tryFormMatchmaking(options?: { forceMin?: boolean }): MatchmakingFormedMatch | null {
+/**
+ * Forme une room :
+ * - à 4 humains : immédiatement, sans bot ;
+ * - si `fillWithBots` (timeout) et bots activés : avec les humains présents + bots jusqu'à 4 ;
+ * - sinon si `forceMin` (timeout, bots désactivés) : match humain à 3+.
+ */
+export function tryFormMatchmaking(options?: {
+  forceMin?: boolean;
+  fillWithBots?: boolean;
+}): MatchmakingFormedMatch | null {
   if (queue.length >= MATCH_PREFERRED) {
-    return formMatchWithCount(MATCH_PREFERRED);
+    return formMatch(MATCH_PREFERRED, MATCH_PREFERRED);
+  }
+  if (options?.fillWithBots && BOTS_ENABLED && queue.length >= 1) {
+    return formMatch(queue.length, MATCH_PREFERRED);
   }
   if (options?.forceMin && queue.length >= MATCH_MIN) {
-    return formMatchWithCount(queue.length);
+    return formMatch(queue.length, queue.length);
   }
   return null;
 }

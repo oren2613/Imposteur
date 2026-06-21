@@ -25,6 +25,8 @@ export interface GamePlayerInternal {
   word: string | null;
   eliminated: boolean;
   avatarUrl?: string | null;
+  /** Joueur IA (pas de socket réel, actions pilotées par le moteur de bots) */
+  isBot?: boolean;
 }
 
 /** Membre lobby (pour construire les joueurs) */
@@ -33,6 +35,7 @@ interface Member {
   name: string;
   sessionId?: string;
   avatarUrl?: string | null;
+  isBot?: boolean;
 }
 
 /**
@@ -59,6 +62,7 @@ export function createGamePlayers(
       word,
       eliminated: false,
       avatarUrl: m.avatarUrl ?? null,
+      isBot: m.isBot ?? false,
     };
   });
 }

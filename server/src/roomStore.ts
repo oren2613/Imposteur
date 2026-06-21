@@ -14,7 +14,9 @@ import type {
   PlayerPrivateView,
   WordPair,
   Winner,
+  ClueEntry,
 } from './types.js';
+import type { Role } from '../shared/types.js';
 import type { GamePlayerInternal } from './gameLogic.js';
 import { startGameLogic, checkVictoryAfterElimination } from './gameLogic.js';
 import {
@@ -52,6 +54,8 @@ interface Room {
   eliminatedPlayerId?: string | null;
   /** Gagnant quand phase === 'end' */
   winner?: Winner | null;
+  /** Indices écrits de la discussion en cours (réinitialisés à chaque discussion) */
+  clues?: ClueEntry[];
   /** Votes du tour courant : playerId → targetPlayerId */
   votes?: Map<string, string>;
   /** Début de la phase vote (epoch ms) pour timer 30 s */
@@ -302,10 +306,11 @@ function toLobbyState(room: Room): RoomLobbyState {
       socketId: m.socketId,
       name: m.name,
       isHost: m.isHost,
-      ready: readySet.has(m.socketId),
+      ready: readySet.has(m.socketId) || (m.isBot ?? false),
       gamesPlayed: s.gamesPlayed,
       wins: s.wins,
       avatarUrl: m.avatarUrl ?? null,
+      isBot: m.isBot ?? false,
     };
   });
   return {
@@ -339,8 +344,10 @@ function toGameState(room: Room): RoomGameState {
       id: p.id,
       name: p.name,
       eliminated: p.eliminated,
-      connected: p.socketId !== '',
+      // Un bot est toujours « connecté » : il n'a pas de socket réel.
+      connected: p.isBot ? true : p.socketId !== '',
       avatarUrl: p.avatarUrl ?? null,
+      isBot: p.isBot ?? false,
     })
   );
   const phase = room.phase ?? 'roleReveal';
@@ -354,6 +361,9 @@ function toGameState(room: Room): RoomGameState {
     winner: room.winner ?? null,
     wordPair: phase === 'end' ? (room.wordPair ?? null) : null,
   };
+  if (room.clues && room.clues.length > 0) {
+    state.clues = room.clues.map((c) => ({ ...c }));
+  }
   if (phase === 'discussion' && room.discussionOrder != null) {
     state.discussionOrder = room.discussionOrder;
     state.currentSpeakerIndex = room.currentSpeakerIndex ?? 0;
@@ -411,7 +421,7 @@ function isLobbyFull(room: Room): boolean {
 function allLobbyMembersReady(room: Room): boolean {
   if (!isLobbyFull(room)) return false;
   const ready = room.readySocketIds ?? new Set<string>();
-  return room.members.every((m) => ready.has(m.socketId));
+  return room.members.every((m) => m.isBot || ready.has(m.socketId));
 }
 
 function allConnectedMembersReadyForNextRound(room: Room, socketIdsInRoom: string[]): boolean {
@@ -946,6 +956,7 @@ export function transitionRoleRevealToDiscussion(roomId: string): RoomGameState 
   }
   const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
+  room.clues = [];
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
   room.turnStartedAt = Date.now();
@@ -1005,6 +1016,7 @@ export function roleRevealAck(
 
   const aliveIds = room.gamePlayers!.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
+  room.clues = [];
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
   room.turnStartedAt = Date.now();
@@ -1031,7 +1043,8 @@ function beginVotePhase(room: Room): RoomGameState | null {
 function applyBlankVotesForDisconnected(room: Room): void {
   if (!room.votes || !room.gamePlayers) return;
   for (const p of getAlivePlayers(room)) {
-    if (p.socketId === '' && !room.votes.has(p.id)) {
+    // Les bots votent via le moteur d'IA : ne pas leur appliquer un vote blanc auto.
+    if (!p.isBot && p.socketId === '' && !room.votes.has(p.id)) {
       room.votes.set(p.id, VOTE_BLANK);
     }
   }
@@ -1060,6 +1073,7 @@ function resolveVotePhase(room: Room): RoomGameState {
   if (!eliminatedId) {
     const aliveIds = room.gamePlayers!.filter((p) => !p.eliminated).map((p) => p.id);
     room.phase = 'discussion';
+    room.clues = [];
     room.discussionOrder = shuffle(aliveIds);
     room.currentSpeakerIndex = 0;
     room.turnStartedAt = Date.now();
@@ -1212,13 +1226,57 @@ export function discussionPass(roomId: string, socketId: string): DiscussionPass
     return { ok: false, code: 'not_your_turn', message: 'Ce n\'est pas votre tour' };
   }
 
+  return { ok: true, roomState: advanceAfterSpeaker(room) };
+}
+
+/** Avance au prochain orateur (ou lance le vote si tout le monde a parlé). */
+function advanceAfterSpeaker(room: Room): RoomGameState {
+  const idx = room.currentSpeakerIndex ?? 0;
   room.currentSpeakerIndex = idx + 1;
-  if (room.currentSpeakerIndex >= room.discussionOrder.length) {
+  if (room.currentSpeakerIndex >= (room.discussionOrder?.length ?? 0)) {
     const finalized = beginVotePhase(room);
-    return { ok: true, roomState: finalized ?? toGameState(room) };
+    return finalized ?? toGameState(room);
   }
   room.turnStartedAt = Date.now();
-  return { ok: true, roomState: toGameState(room) };
+  return toGameState(room);
+}
+
+/** Enregistre l'indice écrit d'un joueur pour la discussion en cours. */
+function recordClue(room: Room, playerId: string, name: string, text: string): void {
+  const trimmed = text.trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (!trimmed) return;
+  if (!room.clues) room.clues = [];
+  room.clues.push({ playerId, name, text: trimmed });
+}
+
+export type SubmitClueResult =
+  | { ok: true; roomState: RoomGameState }
+  | { ok: false; code: string; message: string };
+
+/**
+ * Un joueur écrit son indice pendant son tour : l'indice est enregistré puis
+ * on passe automatiquement à l'orateur suivant.
+ */
+export function submitClue(roomId: string, socketId: string, text: string): SubmitClueResult {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || !room.gamePlayers || !room.discussionOrder) {
+    return { ok: false, code: 'wrong_phase', message: 'Action non autorisée' };
+  }
+  if (room.phase !== 'discussion') {
+    return { ok: false, code: 'wrong_phase', message: 'Phase incorrecte' };
+  }
+  const idx = room.currentSpeakerIndex ?? 0;
+  const currentPlayerId = room.discussionOrder[idx];
+  const currentPlayer = room.gamePlayers.find((p) => p.id === currentPlayerId);
+  if (!currentPlayer || currentPlayer.socketId !== socketId) {
+    return { ok: false, code: 'not_your_turn', message: 'Ce n\'est pas votre tour' };
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { ok: false, code: 'empty_clue', message: 'Indice vide' };
+  }
+  recordClue(room, currentPlayer.id, currentPlayer.name, trimmed);
+  return { ok: true, roomState: advanceAfterSpeaker(room) };
 }
 
 /**
@@ -1370,6 +1428,7 @@ export function continueAfterEliminated(
   }
   const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
+  room.clues = [];
   room.eliminatedPlayerId = null;
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
@@ -1424,6 +1483,216 @@ export function mrWhiteGuess(roomId: string, socketId: string, guess: string): M
   return { ok: true, roomState: enterEndPhase(room, correct ? 'mrWhite' : 'citoyens') };
 }
 
+// --- Joueurs IA (bots) : ajout au lobby + accesseurs pour le moteur de bots
+
+/** Prénoms crédibles pour les bots (aucun marqueur « IA » visible). */
+const BOT_NAME_POOL = [
+  'Lucas', 'Emma', 'Hugo', 'Léa', 'Nathan', 'Chloé', 'Théo', 'Manon',
+  'Enzo', 'Camille', 'Louis', 'Sarah', 'Jules', 'Inès', 'Gabriel', 'Jade',
+  'Raphaël', 'Louise', 'Adam', 'Alice', 'Noah', 'Lina', 'Maël', 'Anna',
+  'Tom', 'Zoé', 'Ethan', 'Rose', 'Liam', 'Mila',
+];
+
+let botCounter = 0;
+
+function generateBotName(room: Room): string {
+  const used = new Set(room.members.map((m) => m.name.trim().toLowerCase()));
+  const available = shuffle(BOT_NAME_POOL).filter((n) => !used.has(n.toLowerCase()));
+  return available[0] ?? `Joueur ${room.members.length + 1}`;
+}
+
+export type AddBotResult =
+  | { ok: true; roomState: RoomLobbyState }
+  | { ok: false; code: string; message: string };
+
+/** Ajoute un joueur IA au lobby (utilisé par le matchmaking pour compléter une room). */
+export function addBotToRoom(roomId: string): AddBotResult {
+  const room = rooms.get(roomId);
+  if (!room) return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
+  if (room.status !== 'lobby') {
+    return { ok: false, code: 'wrong_phase', message: 'Ajout de bot impossible hors lobby' };
+  }
+  if (room.members.length >= room.config.playerCount) {
+    return { ok: false, code: 'room_full', message: 'La room est pleine' };
+  }
+  const member: RoomMember = {
+    socketId: '',
+    name: generateBotName(room),
+    isHost: false,
+    sessionId: `bot-${++botCounter}-${Math.random().toString(36).slice(2, 8)}`,
+    avatarUrl: null,
+    isBot: true,
+  };
+  room.members.push(member);
+  syncAbandonedState(room);
+  return { ok: true, roomState: toLobbyState(room) };
+}
+
+/** True si la room contient au moins un bot (lobby ou partie). */
+export function roomHasBots(roomId: string): boolean {
+  const room = rooms.get(roomId);
+  if (!room) return false;
+  if (room.gamePlayers) return room.gamePlayers.some((p) => p.isBot);
+  return room.members.some((m) => m.isBot);
+}
+
+export interface BotPlayerInfo {
+  playerId: string;
+  name: string;
+  role: Role;
+  word: string | null;
+}
+
+/** Contexte de décision pour le moteur de bots (infos secrètes incluses). */
+export interface BotContext {
+  roomId: string;
+  phase: GamePhase;
+  alive: { id: string; name: string; isBot: boolean }[];
+  clues: ClueEntry[];
+  discussionStartedAt?: number;
+  currentSpeakerIndex?: number;
+  voteStartedAt?: number;
+  eliminatedPlayerId?: string | null;
+  /** Orateur courant si c'est un bot (sinon null). */
+  currentSpeaker: BotPlayerInfo | null;
+  /** Bots vivants qui n'ont pas encore voté. */
+  botsToVote: BotPlayerInfo[];
+  /** Bot Mr. White éliminé qui doit deviner le mot. */
+  mrWhiteToGuess: BotPlayerInfo | null;
+  /** Bot vivant pouvant relancer après élimination s'il ne reste aucun humain vivant. */
+  botToContinue: string | null;
+}
+
+function botInfo(p: GamePlayerInternal): BotPlayerInfo {
+  return { playerId: p.id, name: p.name, role: p.role, word: p.word };
+}
+
+export function getBotContext(roomId: string): BotContext | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || !room.gamePlayers) return null;
+  if (!room.gamePlayers.some((p) => p.isBot)) return null;
+
+  const phase = room.phase ?? 'roleReveal';
+  const alivePlayers = room.gamePlayers.filter((p) => !p.eliminated);
+  const alive = alivePlayers.map((p) => ({ id: p.id, name: p.name, isBot: p.isBot ?? false }));
+  const clues = (room.clues ?? []).map((c) => ({ ...c }));
+
+  let currentSpeaker: BotPlayerInfo | null = null;
+  if (phase === 'discussion' && room.discussionOrder) {
+    const idx = room.currentSpeakerIndex ?? 0;
+    const id = room.discussionOrder[idx];
+    const p = room.gamePlayers.find((x) => x.id === id);
+    if (p && p.isBot && !p.eliminated) currentSpeaker = botInfo(p);
+  }
+
+  let botsToVote: BotPlayerInfo[] = [];
+  if (phase === 'vote' && room.votes) {
+    botsToVote = alivePlayers
+      .filter((p) => p.isBot && !room.votes!.has(p.id))
+      .map(botInfo);
+  }
+
+  let mrWhiteToGuess: BotPlayerInfo | null = null;
+  if (phase === 'mrWhiteGuess' && room.eliminatedPlayerId) {
+    const p = room.gamePlayers.find((x) => x.id === room.eliminatedPlayerId);
+    if (p && p.isBot && p.role === 'mrWhite') mrWhiteToGuess = botInfo(p);
+  }
+
+  let botToContinue: string | null = null;
+  if (phase === 'eliminatedReveal') {
+    const anyAliveHuman = alivePlayers.some((p) => !p.isBot && p.socketId !== '');
+    if (!anyAliveHuman) {
+      const bot = alivePlayers.find((p) => p.isBot);
+      botToContinue = bot ? bot.id : null;
+    }
+  }
+
+  return {
+    roomId,
+    phase,
+    alive,
+    clues,
+    discussionStartedAt: room.discussionStartedAt,
+    currentSpeakerIndex: room.currentSpeakerIndex,
+    voteStartedAt: room.voteStartedAt,
+    eliminatedPlayerId: room.eliminatedPlayerId ?? null,
+    currentSpeaker,
+    botsToVote,
+    mrWhiteToGuess,
+    botToContinue,
+  };
+}
+
+/** Un bot dépose son indice pendant son tour. Retourne le nouvel état ou null si l'action n'est plus valide. */
+export function applyBotClue(roomId: string, playerId: string, text: string): RoomGameState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'discussion' || !room.gamePlayers || !room.discussionOrder) {
+    return null;
+  }
+  const idx = room.currentSpeakerIndex ?? 0;
+  if (room.discussionOrder[idx] !== playerId) return null;
+  const player = room.gamePlayers.find((p) => p.id === playerId);
+  if (!player || !player.isBot || player.eliminated) return null;
+  if (text && text.trim()) recordClue(room, player.id, player.name, text);
+  return advanceAfterSpeaker(room);
+}
+
+/** Un bot vote. Retourne { complete, roomState } ou null si invalide. */
+export function applyBotVote(
+  roomId: string,
+  playerId: string,
+  targetPlayerId: string
+): { complete: boolean; roomState: RoomGameState } | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'vote' || !room.gamePlayers || !room.votes) {
+    return null;
+  }
+  const voter = room.gamePlayers.find((p) => p.id === playerId);
+  if (!voter || !voter.isBot || voter.eliminated || room.votes.has(voter.id)) return null;
+  let target = targetPlayerId;
+  if (target !== VOTE_BLANK) {
+    const t = room.gamePlayers.find((p) => p.id === target);
+    if (!t || t.eliminated || t.id === voter.id) target = VOTE_BLANK;
+  }
+  room.votes.set(voter.id, target);
+  const finalized = tryFinalizeVote(room);
+  if (finalized) return { complete: true, roomState: finalized.roomState };
+  return { complete: false, roomState: toGameState(room) };
+}
+
+/** Un bot Mr. White éliminé propose le mot des Citoyens. */
+export function applyBotMrWhiteGuess(roomId: string, playerId: string, guess: string): RoomGameState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'mrWhiteGuess' || !room.gamePlayers || !room.wordPair) {
+    return null;
+  }
+  if (room.eliminatedPlayerId !== playerId) return null;
+  const mrWhite = room.gamePlayers.find((p) => p.id === playerId);
+  if (!mrWhite || !mrWhite.isBot || mrWhite.role !== 'mrWhite') return null;
+  const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
+  const normalizedCitizen = room.wordPair.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
+  return enterEndPhase(room, normalizedGuess === normalizedCitizen ? 'mrWhite' : 'citoyens');
+}
+
+/** Un bot relance la discussion après l'élimination (uniquement si aucun humain vivant ne peut le faire). */
+export function applyBotContinueAfterEliminated(roomId: string, playerId: string): RoomGameState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'eliminatedReveal' || !room.gamePlayers) {
+    return null;
+  }
+  const player = room.gamePlayers.find((p) => p.id === playerId);
+  if (!player || !player.isBot || player.eliminated) return null;
+  const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
+  room.phase = 'discussion';
+  room.clues = [];
+  room.eliminatedPlayerId = null;
+  room.discussionOrder = shuffle(aliveIds);
+  room.currentSpeakerIndex = 0;
+  room.turnStartedAt = Date.now();
+  room.discussionStartedAt = Date.now();
+  return toGameState(room);
+}
+
 // --- update_room_config, start_next_round (room persistante, manches multiples)
 
 function updateStatsFromGame(room: Room): void {
@@ -1451,6 +1720,7 @@ function clearGameState(room: Room): void {
   room.roleRevealAcked = undefined;
   room.eliminatedPlayerId = undefined;
   room.winner = undefined;
+  room.clues = undefined;
   room.votes = undefined;
   room.voteStartedAt = undefined;
   room.discussionOrder = undefined;
@@ -1528,9 +1798,13 @@ export function startNextRoundInternal(
   clearEndIntermissionState(room);
 
   const connectedSet = new Set(socketIdsInRoom);
-  room.members = room.members.filter((m) => m.socketId !== '' && connectedSet.has(m.socketId));
+  // On conserve les humains connectés et tous les bots.
+  room.members = room.members.filter(
+    (m) => m.isBot || (m.socketId !== '' && connectedSet.has(m.socketId))
+  );
 
-  if (room.members.length === 0) {
+  const humanCount = room.members.filter((m) => !m.isBot).length;
+  if (humanCount === 0) {
     return { ok: false, code: 'no_players', message: 'Aucun joueur connecté dans la room' };
   }
 
@@ -1538,10 +1812,11 @@ export function startNextRoundInternal(
     return { ok: false, code: 'not_enough_players', message: `Il faut au moins ${MIN_PLAYERS} joueurs` };
   }
 
-  if (!room.members.some((m) => m.socketId === room.hostSocketId)) {
-    room.hostSocketId = room.members[0].socketId;
-    room.members.forEach((m, i) => {
-      m.isHost = i === 0;
+  if (!room.members.some((m) => m.socketId === room.hostSocketId && !m.isBot)) {
+    const firstHuman = room.members.find((m) => !m.isBot) ?? room.members[0];
+    room.hostSocketId = firstHuman.socketId;
+    room.members.forEach((m) => {
+      m.isHost = m === firstHuman;
     });
   }
 
@@ -1591,7 +1866,8 @@ export function resolveReplayTimeout(roomId: string): ReplayTimeoutResult {
   const kept: RoomMember[] = [];
   const kickedSocketIds: string[] = [];
   for (const m of room.members) {
-    const isReady = m.socketId !== '' && readySet.has(m.socketId);
+    // Les bots sont toujours conservés ; les humains uniquement s'ils ont validé.
+    const isReady = m.isBot || (m.socketId !== '' && readySet.has(m.socketId));
     if (isReady) {
       kept.push(m);
     } else if (m.socketId !== '') {
@@ -1605,7 +1881,8 @@ export function resolveReplayTimeout(roomId: string): ReplayTimeoutResult {
   }
   room.members = kept;
 
-  if (kept.length >= MIN_PLAYERS) {
+  const keptHumans = kept.filter((m) => !m.isBot && m.socketId !== '').length;
+  if (kept.length >= MIN_PLAYERS && keptHumans >= 1) {
     const result = startNextRoundInternal(roomId, kept.map((m) => m.socketId));
     if (result.ok) {
       return { action: 'started', roomState: result.roomState, kickedSocketIds };
@@ -1638,6 +1915,7 @@ interface PersistedRoom {
   roleRevealAcked?: string[];
   eliminatedPlayerId?: string | null;
   winner?: Winner | null;
+  clues?: ClueEntry[];
   votes?: [string, string][];
   voteStartedAt?: number;
   discussionOrder?: string[];
@@ -1668,6 +1946,7 @@ function roomToPersisted(room: Room): PersistedRoom {
     roleRevealAcked: room.roleRevealAcked ? [...room.roleRevealAcked] : undefined,
     eliminatedPlayerId: room.eliminatedPlayerId,
     winner: room.winner,
+    clues: room.clues ? room.clues.map((c) => ({ ...c })) : undefined,
     votes: room.votes ? [...room.votes.entries()] : undefined,
     voteStartedAt: room.voteStartedAt,
     discussionOrder: room.discussionOrder,
@@ -1712,6 +1991,7 @@ function persistedToRoom(data: PersistedRoom): Room {
     roleRevealAcked: data.roleRevealAcked ? new Set(data.roleRevealAcked) : undefined,
     eliminatedPlayerId: data.eliminatedPlayerId,
     winner: data.winner ?? null,
+    clues: data.clues ? data.clues.map((c) => ({ ...c })) : undefined,
     votes: data.votes ? new Map(data.votes) : undefined,
     voteStartedAt: data.voteStartedAt,
     discussionOrder: data.discussionOrder,

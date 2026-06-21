@@ -19,6 +19,7 @@ export interface RoomMember {
   gamesPlayed?: number;
   wins?: number;
   avatarUrl?: string | null;
+  isBot?: boolean;
 }
 
 /** État public d'une room en lobby */
@@ -48,6 +49,14 @@ export interface PlayerPublic {
   eliminated: boolean;
   connected: boolean;
   avatarUrl?: string | null;
+  isBot?: boolean;
+}
+
+/** Indice écrit donné par un joueur pendant la discussion */
+export interface ClueEntry {
+  playerId: string;
+  name: string;
+  text: string;
 }
 
 /** État public d'une room en partie (reçu via game_state) */
@@ -60,6 +69,8 @@ export interface RoomGameState {
   eliminatedPlayerId: string | null;
   winner: 'citoyens' | 'imposteur' | 'mrWhite' | null;
   wordPair: { motCitoyens: string; motImposteur: string } | null;
+  /** Indices écrits de la discussion en cours */
+  clues?: ClueEntry[];
   discussionOrder?: string[];
   currentSpeakerIndex?: number;
   turnStartedAt?: number;

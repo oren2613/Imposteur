@@ -162,6 +162,8 @@ interface OnlineContextValue {
   setLobbyReady: (ready: boolean) => void;
   /** Passer mon tour en discussion (émet discussion_pass) */
   discussionPass: () => void;
+  /** Écrire mon indice pendant mon tour (émet submit_clue, passe au suivant) */
+  submitClue: (text: string) => void;
   /** Voter pour éliminer un joueur (émet vote) */
   vote: (targetPlayerId: string) => void;
   /** Continuer après révélation de l'éliminé (émet continue_after_eliminated) */
@@ -664,6 +666,13 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     socketRef.current.emit('discussion_pass');
   }, []);
 
+  const submitClue = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!socketRef.current || !trimmed) return;
+    setError(null);
+    socketRef.current.emit('submit_clue', { text: trimmed });
+  }, []);
+
   const vote = useCallback((targetPlayerId: string) => {
     if (!socketRef.current) return;
     setError(null);
@@ -783,6 +792,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       leaveRoom,
       setLobbyReady,
       discussionPass,
+      submitClue,
       vote,
       continueAfterEliminated,
       submitMrWhiteGuess,
@@ -831,6 +841,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       leaveRoom,
       setLobbyReady,
       discussionPass,
+      submitClue,
       vote,
       continueAfterEliminated,
       submitMrWhiteGuess,

@@ -32,6 +32,7 @@ export function OnlineVoteScreen() {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
   const players = gameState?.players ?? [];
+  const clues = gameState?.clues ?? [];
   const voteProgress = gameState?.voteProgress;
   const votable = players.filter((p) => !p.eliminated && p.id !== myPlayerId);
   const myPlayer = players.find((p) => p.id === myPlayerId);
@@ -153,6 +154,25 @@ export function OnlineVoteScreen() {
               <Loader2 className="w-4 h-4 animate-spin" />
               En attente des autres joueurs…
             </p>
+          </div>
+        )}
+
+        {clues.length > 0 && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
+              Indices donnés
+            </p>
+            <ul className="space-y-2">
+              {clues.map((c, i) => (
+                <li key={`${c.playerId}-${i}`} className="flex items-center gap-2 text-sm">
+                  <span className="font-medium text-slate-800 dark:text-slate-100">{c.name}</span>
+                  <span className="text-slate-400 dark:text-slate-500">·</span>
+                  <span className="text-violet-700 dark:text-violet-300 font-medium break-words">
+                    {c.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

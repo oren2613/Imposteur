@@ -42,12 +42,18 @@ import {
   resolveReplayTimeout,
   listPublicRooms,
   cleanupAbandonedRooms,
+  submitClue,
 } from './roomStore.js';
 import {
   scheduleRoomPersist,
   removePersistedRoom,
   loadPersistedRoomsIntoMemory,
 } from './roomPersistence.js';
+import {
+  setBotBroadcast,
+  onGameStateChanged as notifyBots,
+  warnIfGroqMissing,
+} from './botEngine.js';
 import {
   addToMatchmakingQueue,
   removeFromMatchmakingQueue,
@@ -65,6 +71,7 @@ import type {
   ReconnectToRoomPayload,
   UpdateRoomConfigPayload,
   VotePayload,
+  SubmitCluePayload,
   RoomClosedPayload,
   ErrorPayload,
   YourRolePayload,
@@ -341,8 +348,12 @@ const io = new Server(httpServer, {
   cors: { origin: CORS_ORIGIN },
 });
 
+// Les bots rediffusent l'état via le même canal que les humains.
+setBotBroadcast((roomId, roomState) => broadcastGameState(roomId, roomState));
+
 setMatchmakingTimeoutHandler(() => {
-  const match = tryFormMatchmaking({ forceMin: true });
+  // Attente trop longue : compléter avec des bots (ou match humain forcé si bots désactivés).
+  const match = tryFormMatchmaking({ fillWithBots: true, forceMin: true });
   void applyMatchmakingMatch(match).then(() => {
     broadcastMatchmakingUpdate();
   });
@@ -406,6 +417,7 @@ function broadcastGameStart(roomId: string, roomState: import('./types.js').Room
   }
   io.to(roomId).emit('game_state', { roomState });
   scheduleRoomPersist(roomId);
+  notifyBots(roomId);
   const existing = roleRevealTimers.get(roomId);
   if (existing) clearTimeout(existing);
   roleRevealTimers.set(
@@ -415,6 +427,8 @@ function broadcastGameStart(roomId: string, roomState: import('./types.js').Room
       const newState = transitionRoleRevealToDiscussion(roomId);
       if (newState) {
         io.to(roomId).emit('game_state', { roomState: newState });
+        scheduleRoomPersist(roomId);
+        notifyBots(roomId);
       }
     }, ROLE_REVEAL_COUNTDOWN_MS)
   );
@@ -439,6 +453,7 @@ function triggerAutoNextRound(roomId: string): void {
 function broadcastGameState(roomId: string, roomState: import('./types.js').RoomGameState): void {
   io.to(roomId).emit('game_state', { roomState });
   scheduleRoomPersist(roomId);
+  notifyBots(roomId);
   if (roomState.phase === 'end') {
     // Pousser un room_state à jour pour rafraîchir les stats (parties/victoires).
     const snapshot = getRoomMemberSnapshot(roomId);
@@ -601,7 +616,7 @@ async function applyMatchmakingMatch(
   match: ReturnType<typeof tryFormMatchmaking>
 ): Promise<void> {
   if (!match) return;
-  const finalRoomState = match.players[match.players.length - 1]?.roomState;
+  const finalRoomState = match.finalRoomState;
   for (const player of match.players) {
     const peer = io.sockets.sockets.get(player.socketId);
     if (!peer) continue;
@@ -860,6 +875,7 @@ io.on('connection', (socket) => {
           socket.emit('room_state', { roomState: snapshot });
         }
         io.to(payload.roomId).emit('game_state', { roomState: result.roomState });
+        notifyBots(payload.roomId);
         return;
       }
       socket.emit('room_joined', {
@@ -909,6 +925,7 @@ io.on('connection', (socket) => {
           socket.emit('room_state', { roomState: snapshot });
         }
         io.to(roomId).emit('game_state', { roomState: result.roomState });
+        notifyBots(roomId);
       }
     })();
   });
@@ -975,6 +992,33 @@ io.on('connection', (socket) => {
     }
     const gameStatePayload: GameStatePayload = { roomState: result.roomState };
     io.to(roomId).emit('game_state', gameStatePayload);
+    scheduleRoomPersist(roomId);
+    notifyBots(roomId);
+  });
+
+  socket.on('submit_clue', (payload: unknown) => {
+    const roomId = getRoomIdBySocket(socket.id);
+    if (!roomId) {
+      emitError(socket, 'not_in_room', 'Vous n\'êtes dans aucune room');
+      return;
+    }
+    if (
+      payload === null ||
+      typeof payload !== 'object' ||
+      !('text' in payload) ||
+      typeof (payload as SubmitCluePayload).text !== 'string'
+    ) {
+      emitError(socket, 'invalid_payload', 'Payload submit_clue invalide');
+      return;
+    }
+    const result = submitClue(roomId, socket.id, (payload as SubmitCluePayload).text);
+    if (!result.ok) {
+      emitError(socket, result.code, result.message);
+      return;
+    }
+    io.to(roomId).emit('game_state', { roomState: result.roomState });
+    scheduleRoomPersist(roomId);
+    notifyBots(roomId);
   });
 
   socket.on('voice_signal', (payload: unknown) => {
@@ -1005,6 +1049,8 @@ io.on('connection', (socket) => {
     }
     const gameStatePayload: GameStatePayload = { roomState: result.roomState };
     io.to(roomId).emit('game_state', gameStatePayload);
+    scheduleRoomPersist(roomId);
+    notifyBots(roomId);
   });
 
   socket.on('vote', (payload: unknown) => {
@@ -1035,6 +1081,8 @@ io.on('connection', (socket) => {
       broadcastGameState(roomId, result.roomState);
     } else {
       io.to(roomId).emit('game_state', { roomState: result.roomState });
+      scheduleRoomPersist(roomId);
+      notifyBots(roomId);
     }
   });
 
@@ -1051,6 +1099,8 @@ io.on('connection', (socket) => {
     }
     const gameStatePayload: GameStatePayload = { roomState: result.roomState };
     io.to(roomId).emit('game_state', gameStatePayload);
+    scheduleRoomPersist(roomId);
+    notifyBots(roomId);
   });
 
   socket.on('update_room_config', (payload: unknown) => {
@@ -1159,12 +1209,14 @@ setInterval(() => {
     if (completeState) {
       io.to(roomId).emit('game_state', { roomState: completeState });
       scheduleRoomPersist(roomId);
+      notifyBots(roomId);
       continue;
     }
     const timeoutState = forceDiscussionToVoteIfTimeout(roomId);
     if (timeoutState) {
       io.to(roomId).emit('game_state', { roomState: timeoutState });
       scheduleRoomPersist(roomId);
+      notifyBots(roomId);
       continue;
     }
     const roomSockets = io.sockets.adapter.rooms.get(roomId);
@@ -1173,6 +1225,7 @@ setInterval(() => {
     if (newState) {
       io.to(roomId).emit('game_state', { roomState: newState });
       scheduleRoomPersist(roomId);
+      notifyBots(roomId);
     }
   }
 
@@ -1181,6 +1234,7 @@ setInterval(() => {
     if (voteState) {
       io.to(roomId).emit('game_state', { roomState: voteState });
       scheduleRoomPersist(roomId);
+      notifyBots(roomId);
     }
   }
 }, DISCUSSION_TIMEOUT_CHECK_MS);
@@ -1206,6 +1260,7 @@ setInterval(() => {
 
 async function startServer() {
   await initDb();
+  warnIfGroqMissing();
   const loadedRooms = await loadPersistedRoomsIntoMemory();
   httpServer.listen(PORT, '0.0.0.0', () => {
     const client = fs.existsSync(clientDistDir) ? ' + frontend' : '';

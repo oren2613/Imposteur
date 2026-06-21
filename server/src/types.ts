@@ -19,6 +19,8 @@ export interface RoomMember {
   sessionId?: string;
   /** Photo de profil (null = avatar par défaut) */
   avatarUrl?: string | null;
+  /** Joueur contrôlé par l'IA (complète le matchmaking). Pas de socket réel. */
+  isBot?: boolean;
 }
 
 /** Membre tel qu'exposé dans le lobby (avec stats, sans sessionId) */
@@ -30,6 +32,8 @@ export interface LobbyMemberPublic {
   gamesPlayed: number;
   wins: number;
   avatarUrl?: string | null;
+  /** Joueur IA (exposé sans être mis en avant côté UI) */
+  isBot?: boolean;
 }
 
 /** État public d'une room en lobby */
@@ -68,6 +72,15 @@ export interface PlayerPublic {
   /** false si le joueur a perdu sa connexion (refresh, onglet fermé) */
   connected: boolean;
   avatarUrl?: string | null;
+  /** Joueur IA (exposé sans être mis en avant côté UI) */
+  isBot?: boolean;
+}
+
+/** Indice écrit donné par un joueur pendant son tour de discussion */
+export interface ClueEntry {
+  playerId: string;
+  name: string;
+  text: string;
 }
 
 /** Vue privée du joueur (mot ou null pour Mr. White) */
@@ -86,6 +99,8 @@ export interface RoomGameState {
   winner: Winner | null;
   /** Présent uniquement quand phase === 'end' */
   wordPair: WordPair | null;
+  /** Indices écrits donnés pendant la discussion en cours (réinitialisés à chaque discussion) */
+  clues?: ClueEntry[];
   /** Phase discussion : ordre de passage (playerIds) */
   discussionOrder?: string[];
   /** Index du joueur qui parle */
@@ -159,6 +174,11 @@ export interface LobbyReadyPayload {
 /** Vote (client → serveur) */
 export interface VotePayload {
   targetPlayerId: string;
+}
+
+/** Indice écrit pendant son tour de discussion (client → serveur) */
+export interface SubmitCluePayload {
+  text: string;
 }
 
 // --- Payloads serveur → client

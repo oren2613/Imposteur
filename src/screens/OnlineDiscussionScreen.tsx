@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Heart } from 'lucide-react';
+import { Mic, MicOff, Heart, Send } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import { Button } from '../components/Button';
@@ -22,6 +22,7 @@ export function OnlineDiscussionScreen() {
     myWord,
     error,
     discussionPass,
+    submitClue,
     clearError,
     friendsList,
     getSocket,
@@ -29,6 +30,7 @@ export function OnlineDiscussionScreen() {
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [showMyWord, setShowMyWord] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [clueText, setClueText] = useState('');
   const passedForTurnRef = useRef(false);
 
   const order = gameState?.discussionOrder ?? [];
@@ -38,6 +40,7 @@ export function OnlineDiscussionScreen() {
   const discussionStartedAt = gameState?.discussionStartedAt ?? 0;
   const discussionDurationMs = gameState?.discussionDurationMs ?? 120_000;
   const players = gameState?.players ?? [];
+  const clues = gameState?.clues ?? [];
   const myPlayer = myPlayerId != null ? players.find((p) => p.id === myPlayerId) : null;
   const amEliminated = myPlayer?.eliminated === true;
 
@@ -72,6 +75,18 @@ export function OnlineDiscussionScreen() {
     if (!gameState || currentIndex >= order.length) return;
     passedForTurnRef.current = false;
   }, [gameState, currentIndex, order.length]);
+
+  useEffect(() => {
+    setClueText('');
+  }, [currentIndex]);
+
+  const handleSubmitClue = () => {
+    const text = clueText.trim();
+    if (!text || !isMyTurn) return;
+    clearError();
+    submitClue(text);
+    setClueText('');
+  };
 
   useEffect(() => {
     if (order.length === 0 || currentIndex >= order.length) {
@@ -187,6 +202,25 @@ export function OnlineDiscussionScreen() {
               </p>
             </div>
 
+            {clues.length > 0 && (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
+                  Indices donnés
+                </p>
+                <ul className="space-y-2">
+                  {clues.map((c, i) => (
+                    <li key={`${c.playerId}-${i}`} className="flex items-center gap-2 text-sm">
+                      <span className="font-medium text-slate-800 dark:text-slate-100">{c.name}</span>
+                      <span className="text-slate-400 dark:text-slate-500">·</span>
+                      <span className="text-violet-700 dark:text-violet-300 font-medium break-words">
+                        {c.text}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="flex flex-col gap-3">
               <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
                 Ordre de passage
@@ -258,6 +292,37 @@ export function OnlineDiscussionScreen() {
                 />
               </div>
             </div>
+
+            {isMyTurn && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                  Ton indice (un mot ou une courte expression)
+                </p>
+                <div className="flex gap-2 items-stretch">
+                  <input
+                    type="text"
+                    value={clueText}
+                    onChange={(e) => setClueText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSubmitClue();
+                    }}
+                    maxLength={60}
+                    placeholder="Écris ton indice…"
+                    className="flex-1 min-w-0 px-4 py-4 rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                    autoFocus
+                  />
+                  <Button
+                    size="lg"
+                    onClick={handleSubmitClue}
+                    disabled={!clueText.trim()}
+                    aria-label="Envoyer mon indice"
+                    className="shrink-0 !px-5"
+                  >
+                    <Send className="w-5 h-5" />
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-3 items-center">
               {isMyTurn && (
