@@ -23,7 +23,6 @@ import { OnlineBrowseScreen } from './screens/OnlineBrowseScreen';
 import { OnlineLobbyScreen } from './screens/OnlineLobbyScreen';
 import { OnlineRoleRevealScreen } from './screens/OnlineRoleRevealScreen';
 import { OnlineDiscussionScreen } from './screens/OnlineDiscussionScreen';
-import { OnlineVoteScreen } from './screens/OnlineVoteScreen';
 import { OnlineEliminatedRevealScreen } from './screens/OnlineEliminatedRevealScreen';
 import { OnlineMrWhiteGuessScreen } from './screens/OnlineMrWhiteGuessScreen';
 import { OnlineEndScreen } from './screens/OnlineEndScreen';
@@ -62,8 +61,7 @@ function AppContent() {
   if (phase === 'onlineBrowse') return <OnlineBrowseScreen />;
   if (phase === 'onlineLobby') return <OnlineLobbyScreen />;
   if (phase === 'onlineRoleReveal') return <OnlineRoleRevealScreen />;
-  if (phase === 'onlineDiscussion') return <OnlineDiscussionScreen />;
-  if (phase === 'onlineVote') return <OnlineVoteScreen />;
+  if (phase === 'onlineDiscussion' || phase === 'onlineVote') return <OnlineDiscussionScreen />;
   if (phase === 'onlineEliminatedReveal') return <OnlineEliminatedRevealScreen />;
   if (phase === 'onlineMrWhiteGuess') return <OnlineMrWhiteGuessScreen />;
   if (phase === 'onlineEnd') return <OnlineEndScreen />;

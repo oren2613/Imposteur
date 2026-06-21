@@ -127,6 +127,10 @@ export interface RoomGameState {
   voteStartedAt?: number;
   /** Durée max du vote en ms (30 000) */
   voteDurationMs?: number;
+  /** Début de la devinette Mr. White (epoch ms) */
+  mrWhiteGuessStartedAt?: number;
+  /** Durée max de la devinette Mr. White en ms */
+  mrWhiteGuessDurationMs?: number;
 }
 
 /** Gagnant (pour typage, pas utilisé dans ce sprint) */

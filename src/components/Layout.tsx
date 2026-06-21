@@ -8,12 +8,14 @@ interface LayoutProps {
   backLabel?: string;
   /** Pour les écrans sensibles (révélation de rôle), masquer le retour */
   hideBack?: boolean;
+  /** Utilise toute la hauteur disponible (écran de jeu compact) */
+  fillHeight?: boolean;
 }
 
-export function Layout({ title, children, onBack, backLabel = 'Retour', hideBack }: LayoutProps) {
+export function Layout({ title, children, onBack, backLabel = 'Retour', hideBack, fillHeight }: LayoutProps) {
   return (
-    <div className="min-h-screen flex flex-col p-4 sm:p-6 max-w-lg mx-auto">
-      <header className="flex items-center gap-3 mb-6">
+    <div className={`min-h-screen flex flex-col p-4 sm:p-6 max-w-lg mx-auto ${fillHeight ? 'h-dvh max-h-dvh' : ''}`}>
+      <header className="flex items-center gap-3 mb-4 shrink-0">
         {!hideBack && onBack && (
           <Button variant="ghost" size="sm" onClick={onBack} className="shrink-0">
             ← {backLabel}
@@ -23,7 +25,7 @@ export function Layout({ title, children, onBack, backLabel = 'Retour', hideBack
           {title}
         </h1>
       </header>
-      <main className="flex-1 flex flex-col gap-6">{children}</main>
+      <main className={`flex-1 flex flex-col min-h-0 ${fillHeight ? 'gap-3' : 'gap-6'}`}>{children}</main>
     </div>
   );
 }

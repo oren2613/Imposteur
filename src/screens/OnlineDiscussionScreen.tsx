@@ -7,6 +7,8 @@ import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
 import { ViewMyWordModal } from '../components/ViewMyWordModal';
 import { UserAvatar } from '../components/UserAvatar';
+import { OnlineVotePanel } from '../components/OnlineVotePanel';
+import { OnlineErrorBanner } from '../components/OnlineErrorBanner';
 
 const TICK_MS = 200;
 
@@ -41,6 +43,7 @@ export function OnlineDiscussionScreen() {
   const discussionDurationMs = gameState?.discussionDurationMs ?? 120_000;
   const players = gameState?.players ?? [];
   const clues = gameState?.clues ?? [];
+  const isVote = gameState?.phase === 'vote';
   const myPlayer = myPlayerId != null ? players.find((p) => p.id === myPlayerId) : null;
   const amEliminated = myPlayer?.eliminated === true;
 
@@ -54,7 +57,7 @@ export function OnlineDiscussionScreen() {
     .filter((p) => !p.eliminated && p.id !== myPlayerId)
     .map((p) => p.id);
 
-  const voiceActive = gameState?.phase === 'discussion';
+  const voiceActive = gameState?.phase === 'discussion' && !isVote;
 
   const { permissionError, isMicLive, clearPermissionError } = useVoiceChat({
     getSocket,
@@ -122,18 +125,14 @@ export function OnlineDiscussionScreen() {
         : 'Micro activé';
 
   return (
-    <Layout title="Discussion" hideBack onBack={() => {}} backLabel="">
-      <OnlineStatsBar />
-      <div className="flex flex-col gap-6">
-        {error && (
-          <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">
-            <span className="min-w-0 flex-1 text-center">{error}</span>
-            <button type="button" onClick={clearError} className="shrink-0 underline hover:no-underline">
-              Fermer
-            </button>
-          </div>
-        )}
+    <Layout title={isVote ? 'Vote' : 'Discussion'} hideBack onBack={() => {}} backLabel="" fillHeight={isVote}>
+      {!isVote && <OnlineStatsBar />}
+      <OnlineErrorBanner error={error} onDismiss={clearError} />
 
+      {isVote ? (
+        <OnlineVotePanel />
+      ) : (
+      <div className="flex flex-col gap-6 flex-1 min-h-0">
         {permissionError && (
           <div className="flex items-center justify-between gap-3 text-amber-700 dark:text-amber-300 text-sm bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl">
             <span className="min-w-0 flex-1">{permissionError}</span>
@@ -385,6 +384,7 @@ export function OnlineDiscussionScreen() {
           myWord={myWord}
         />
       </div>
+      )}
     </Layout>
   );
 }

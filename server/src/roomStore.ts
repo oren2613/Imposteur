@@ -61,6 +61,8 @@ interface Room {
   votes?: Map<string, string>;
   /** Début de la phase vote (epoch ms) pour timer 30 s */
   voteStartedAt?: number;
+  /** Début de la devinette Mr. White (epoch ms) */
+  mrWhiteGuessStartedAt?: number;
   /** Discussion : ordre des playerIds, index du joueur courant, début du tour */
   discussionOrder?: string[];
   currentSpeakerIndex?: number;
@@ -329,6 +331,8 @@ const TURN_DURATION_MS = 20_000;
 const DISCUSSION_MAX_DURATION_MS = 120_000;
 /** Durée max pour voter avant vote blanc automatique */
 export const VOTE_MAX_DURATION_MS = 30_000;
+/** Durée max pour que Mr. White propose le mot des Citoyens */
+export const MR_WHITE_GUESS_MAX_DURATION_MS = 30_000;
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -391,6 +395,10 @@ function toGameState(room: Room): RoomGameState {
     };
     state.voteStartedAt = room.voteStartedAt;
     state.voteDurationMs = VOTE_MAX_DURATION_MS;
+  }
+  if (phase === 'mrWhiteGuess') {
+    state.mrWhiteGuessStartedAt = room.mrWhiteGuessStartedAt;
+    state.mrWhiteGuessDurationMs = MR_WHITE_GUESS_MAX_DURATION_MS;
   }
   return state;
 }
@@ -1088,6 +1096,7 @@ function resolveVotePhase(room: Room): RoomGameState {
 
   if (eliminated.role === 'mrWhite') {
     room.phase = 'mrWhiteGuess';
+    room.mrWhiteGuessStartedAt = Date.now();
     return toGameState(room);
   }
 
@@ -1456,6 +1465,21 @@ export type MrWhiteGuessResult =
   | { ok: true; roomState: RoomGameState }
   | { ok: false; code: string; message: string };
 
+function applyMrWhiteGuessResult(room: Room, guess: string): RoomGameState {
+  room.mrWhiteGuessStartedAt = undefined;
+  const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
+  const normalizedCitizen = room.wordPair!.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
+  const correct = normalizedGuess === normalizedCitizen;
+  if (correct) {
+    return enterEndPhase(room, 'mrWhite');
+  }
+  if (shouldContinueAfterMrWhiteWrongGuess(room.gamePlayers!)) {
+    room.phase = 'eliminatedReveal';
+    return toGameState(room);
+  }
+  return enterEndPhase(room, 'citoyens');
+}
+
 /**
  * Mr. White (joueur éliminé) soumet sa proposition pour le mot des Citoyens.
  * Comparaison insensible à la casse et aux espaces.
@@ -1479,17 +1503,28 @@ export function mrWhiteGuess(roomId: string, socketId: string, guess: string): M
   if (mrWhite.socketId !== socketId) {
     return { ok: false, code: 'not_mr_white', message: 'Seul Mr. White peut proposer le mot' };
   }
-  const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
-  const normalizedCitizen = room.wordPair.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
-  const correct = normalizedGuess === normalizedCitizen;
-  if (correct) {
-    return { ok: true, roomState: enterEndPhase(room, 'mrWhite') };
+  return { ok: true, roomState: applyMrWhiteGuessResult(room, guess) };
+}
+
+/** Liste des roomId en phase mrWhiteGuess (pour le tick de timeout). */
+export function getMrWhiteGuessRoomIds(): string[] {
+  const ids: string[] = [];
+  for (const [id, room] of rooms) {
+    if (room.status === 'playing' && room.phase === 'mrWhiteGuess') ids.push(id);
   }
-  if (shouldContinueAfterMrWhiteWrongGuess(room.gamePlayers)) {
-    room.phase = 'eliminatedReveal';
-    return { ok: true, roomState: toGameState(room) };
+  return ids;
+}
+
+/**
+ * À l'expiration du timer Mr. White, réponse vide (= mauvaise réponse).
+ */
+export function forceMrWhiteGuessIfTimeout(roomId: string): RoomGameState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'mrWhiteGuess' || !room.mrWhiteGuessStartedAt) {
+    return null;
   }
-  return { ok: true, roomState: enterEndPhase(room, 'citoyens') };
+  if (Date.now() - room.mrWhiteGuessStartedAt < MR_WHITE_GUESS_MAX_DURATION_MS) return null;
+  return applyMrWhiteGuessResult(room, '');
 }
 
 // --- Joueurs IA (bots) : ajout au lobby + accesseurs pour le moteur de bots
@@ -1678,16 +1713,7 @@ export function applyBotMrWhiteGuess(roomId: string, playerId: string, guess: st
   if (room.eliminatedPlayerId !== playerId) return null;
   const mrWhite = room.gamePlayers.find((p) => p.id === playerId);
   if (!mrWhite || !mrWhite.isBot || mrWhite.role !== 'mrWhite') return null;
-  const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
-  const normalizedCitizen = room.wordPair.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (normalizedGuess === normalizedCitizen) {
-    return enterEndPhase(room, 'mrWhite');
-  }
-  if (shouldContinueAfterMrWhiteWrongGuess(room.gamePlayers)) {
-    room.phase = 'eliminatedReveal';
-    return toGameState(room);
-  }
-  return enterEndPhase(room, 'citoyens');
+  return applyMrWhiteGuessResult(room, guess);
 }
 
 /** Un bot relance la discussion après l'élimination (uniquement si aucun humain vivant ne peut le faire). */

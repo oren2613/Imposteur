@@ -105,7 +105,7 @@ const DEFAULT_CONFIG: OnlineGameConfig = {
 const BACKEND_PHASE_TO_FRONT: Record<string, import('../types/game').GamePhase> = {
   roleReveal: 'onlineRoleReveal',
   discussion: 'onlineDiscussion',
-  vote: 'onlineVote',
+  vote: 'onlineDiscussion',
   eliminatedReveal: 'onlineEliminatedReveal',
   mrWhiteGuess: 'onlineMrWhiteGuess',
   end: 'onlineEnd',
@@ -432,6 +432,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     );
 
     socket.on('error', (payload: { code: string; message: string }) => {
+      if (payload.code === 'player_not_found') return;
       setIsMatchmaking(false);
       setMatchmakingQueueSize(0);
       setMatchmakingTimeoutAt(null);

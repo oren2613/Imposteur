@@ -36,6 +36,8 @@ import {
   advanceDiscussionToVoteIfComplete,
   getVoteRoomIds,
   forceVoteIfTimeout,
+  getMrWhiteGuessRoomIds,
+  forceMrWhiteGuessIfTimeout,
   getRoomHostName,
   relayVoiceSignal,
   markSocketBeingReplaced,
@@ -1039,10 +1041,7 @@ io.on('connection', (socket) => {
     const toPlayerId = raw?.toPlayerId;
     const signal = raw?.signal;
     const result = relayVoiceSignal(socket.id, toPlayerId, signal);
-    if (!result.ok) {
-      emitError(socket, result.code, result.message);
-      return;
-    }
+    if (!result.ok) return;
     io.to(result.targetSocketId).emit('voice_signal', {
       fromPlayerId: result.fromPlayerId,
       signal,
@@ -1246,6 +1245,15 @@ setInterval(() => {
     const voteState = forceVoteIfTimeout(roomId);
     if (voteState) {
       io.to(roomId).emit('game_state', { roomState: voteState });
+      scheduleRoomPersist(roomId);
+      notifyBots(roomId);
+    }
+  }
+
+  for (const roomId of getMrWhiteGuessRoomIds()) {
+    const guessState = forceMrWhiteGuessIfTimeout(roomId);
+    if (guessState) {
+      io.to(roomId).emit('game_state', { roomState: guessState });
       scheduleRoomPersist(roomId);
       notifyBots(roomId);
     }
