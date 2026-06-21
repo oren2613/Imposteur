@@ -102,6 +102,12 @@ export interface RoomGameState {
   nextRoundCountdownEndsAt?: number | null;
   /** Fin de partie : socketIds des joueurs prêts pour la manche suivante */
   nextRoundReadySocketIds?: string[];
+  /** Phase vote : progression (sans révéler les cibles) */
+  voteProgress?: {
+    votedCount: number;
+    eligibleCount: number;
+    votedPlayerIds: string[];
+  };
 }
 
 /** Gagnant (pour typage, pas utilisé dans ce sprint) */

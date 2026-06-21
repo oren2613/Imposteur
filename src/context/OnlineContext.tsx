@@ -301,13 +301,19 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     socket.on('room_state', (payload: { roomState: RoomLobbyState }) => {
       clearErrorTimeout();
       setError(null);
+      setRoomId(payload.roomState.roomId);
       setRoomState(payload.roomState);
     });
 
     socket.on('game_state', (payload: { roomState: RoomGameState }) => {
       clearErrorTimeout();
       setError(null);
+      setRoomId(payload.roomState.roomId);
       setGameState(payload.roomState);
+      const prev = getStoredSession();
+      if (prev) {
+        saveSession(prev.playerSessionId, payload.roomState.roomId, prev.playerName);
+      }
       if (reconnectingRef.current) {
         reconnectingRef.current = false;
         setIsReconnecting(false);

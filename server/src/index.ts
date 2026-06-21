@@ -19,6 +19,7 @@ import {
   startNextRoundInternal,
   syncLobbyCountdown,
   setLobbyReady,
+  getRoomMemberSnapshot,
   getPrivateView,
   getRoomIdBySocket,
   transitionRoleRevealToDiscussion,
@@ -808,6 +809,10 @@ io.on('connection', (socket) => {
       } else {
         socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
         socket.emit('game_state', { roomState: result.roomState });
+        const snapshot = getRoomMemberSnapshot(roomId);
+        if (snapshot) {
+          socket.emit('room_state', { roomState: snapshot });
+        }
         io.to(roomId).emit('game_state', { roomState: result.roomState });
       }
     })();
@@ -936,6 +941,8 @@ io.on('connection', (socket) => {
     }
     if (result.complete) {
       broadcastGameState(roomId, result.roomState);
+    } else {
+      io.to(roomId).emit('game_state', { roomState: result.roomState });
     }
   });
 

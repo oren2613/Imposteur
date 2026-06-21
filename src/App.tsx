@@ -36,7 +36,7 @@ function AppContent() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 bg-slate-50 dark:bg-slate-900">
         <p className="text-slate-600 dark:text-slate-400 text-center font-medium">
-          Reconnexion en cours…
+          Retour à ta partie…
         </p>
         <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
       </div>

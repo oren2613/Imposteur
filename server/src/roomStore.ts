@@ -214,6 +214,17 @@ function toGameState(room: Room): RoomGameState {
       ? [...room.nextRoundReadySocketIds]
       : [];
   }
+  if (phase === 'vote' && room.votes && room.gamePlayers) {
+    const eligible = room.gamePlayers.filter((p) => !p.eliminated && p.socketId !== '');
+    const votedPlayerIds = eligible
+      .filter((p) => room.votes!.has(p.socketId))
+      .map((p) => p.id);
+    state.voteProgress = {
+      votedCount: votedPlayerIds.length,
+      eligibleCount: eligible.length,
+      votedPlayerIds,
+    };
+  }
   return state;
 }
 
@@ -289,6 +300,13 @@ export function syncLobbyCountdown(roomId: string): { change: LobbyCountdownChan
 export function getLobbyState(roomId: string): RoomLobbyState | null {
   const room = rooms.get(roomId);
   if (!room || room.status !== 'lobby') return null;
+  return toLobbyState(room);
+}
+
+/** Snapshot membres + config (lobby ou partie en cours) pour reconnexion / UI */
+export function getRoomMemberSnapshot(roomId: string): RoomLobbyState | null {
+  const room = rooms.get(roomId);
+  if (!room) return null;
   return toLobbyState(room);
 }
 
@@ -773,7 +791,7 @@ function computeEliminated(
 
 export type VoteResult =
   | { ok: true; complete: true; roomState: RoomGameState }
-  | { ok: true; complete: false }
+  | { ok: true; complete: false; roomState: RoomGameState }
   | { ok: false; code: string; message: string };
 
 export function vote(
@@ -812,7 +830,7 @@ export function vote(
   );
   const allVoted = eligibleSocketIds.size > 0 && [...eligibleSocketIds].every((id) => room.votes!.has(id));
   if (!allVoted) {
-    return { ok: true, complete: false };
+    return { ok: true, complete: false, roomState: toGameState(room) };
   }
 
   const eliminatedId = computeEliminated(room.gamePlayers, room.votes);

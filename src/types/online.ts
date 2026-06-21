@@ -72,6 +72,12 @@ export interface RoomGameState {
   nextRoundCountdownEndsAt?: number | null;
   /** Fin de partie : joueurs prêts pour la manche suivante */
   nextRoundReadySocketIds?: string[];
+  /** Phase vote : progression (sans révéler les cibles) */
+  voteProgress?: {
+    votedCount: number;
+    eligibleCount: number;
+    votedPlayerIds: string[];
+  };
 }
 
 /** Payload your_role (mot + id du joueur) */
