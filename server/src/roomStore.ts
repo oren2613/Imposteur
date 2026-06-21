@@ -190,7 +190,7 @@ function attachSocketToMember(
   clientSessionId?: string
 ): AttachSocketResult {
   let replacedSocketId: string | undefined;
-  if (member.socketId !== '' && member.socketId !== socketId && socketToRoomId.has(member.socketId)) {
+  if (member.socketId !== '' && member.socketId !== socketId) {
     replacedSocketId = member.socketId;
     socketToRoomId.delete(replacedSocketId);
     if (room.readySocketIds) room.readySocketIds.delete(replacedSocketId);
@@ -477,6 +477,10 @@ export function createRoom(
   clientSessionId?: string,
   avatarUrl?: string | null
 ): CreateRoomResult {
+  if (socketToRoomId.has(socketId)) {
+    return { ok: false, code: 'already_in_room', message: 'Tu es déjà dans une room' };
+  }
+
   const configCheck = validateConfig(config);
   if (!configCheck.ok) return { ok: false, code: configCheck.code!, message: configCheck.message! };
 
@@ -524,6 +528,11 @@ export function joinRoom(
   const room = rooms.get(roomId);
   if (!room) {
     return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
+  }
+
+  const existingRoomId = socketToRoomId.get(socketId);
+  if (existingRoomId && existingRoomId !== roomId) {
+    return { ok: false, code: 'already_in_room', message: 'Tu es déjà dans une autre room' };
   }
 
   const trimmedName = playerName.trim();

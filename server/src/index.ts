@@ -441,13 +441,24 @@ function broadcastGameState(roomId: string, roomState: import('./types.js').Room
   }
 }
 
-function kickReplacedSocket(replacedSocketId: string, roomId: string): void {
+function kickReplacedSocket(replacedSocketId: string): void {
   markSocketBeingReplaced(replacedSocketId);
   const old = io.sockets.sockets.get(replacedSocketId);
   if (!old) return;
+  const roomId = getRoomIdBySocket(replacedSocketId);
   old.emit('session_replaced', { message: 'Connecté depuis un autre onglet.' });
-  old.leave(roomId);
+  if (roomId) old.leave(roomId);
   old.disconnect(true);
+}
+
+function takeOverAuthenticatedSocket(newSocketId: string, userId: number): void {
+  const prevSocketId = userIdToSocketId.get(userId);
+  if (prevSocketId && prevSocketId !== newSocketId) {
+    kickReplacedSocket(prevSocketId);
+    socketToUserId.delete(prevSocketId);
+  }
+  socketToUserId.set(newSocketId, userId);
+  userIdToSocketId.set(userId, newSocketId);
 }
 
 function applySessionTakeover(
@@ -455,7 +466,7 @@ function applySessionTakeover(
   roomId: string
 ): void {
   if (result.replacedSocketId) {
-    kickReplacedSocket(result.replacedSocketId, roomId);
+    kickReplacedSocket(result.replacedSocketId);
   }
   scheduleRoomPersist(roomId);
 }
@@ -588,11 +599,7 @@ async function associateSocketWithUser(socket: import('socket.io').Socket, authT
   if (!authToken || typeof authToken !== 'string') return;
   const user = await getUserFromToken(authToken);
   if (user) {
-    const uid = Number(user.id);
-    const prev = userIdToSocketId.get(uid);
-    if (prev) socketToUserId.delete(prev);
-    socketToUserId.set(socket.id, uid);
-    userIdToSocketId.set(uid, socket.id);
+    takeOverAuthenticatedSocket(socket.id, Number(user.id));
   }
 }
 
@@ -627,10 +634,7 @@ io.on('connection', (socket) => {
     void getUserFromToken(token).then((user) => {
       if (!user) return;
       const uid = Number(user.id);
-      const prev = userIdToSocketId.get(uid);
-      if (prev) socketToUserId.delete(prev);
-      socketToUserId.set(socket.id, uid);
-      userIdToSocketId.set(uid, socket.id);
+      takeOverAuthenticatedSocket(socket.id, uid);
       socket.emit('authenticated', { userId: uid, username: user.username });
       void broadcastFriendStatus(uid, true);
     });
@@ -699,6 +703,11 @@ io.on('connection', (socket) => {
   socket.on('create_room', (payload: unknown) => {
     if (!isCreateRoomPayload(payload)) {
       emitError(socket, 'invalid_payload', 'Payload create_room invalide');
+      return;
+    }
+
+    if (getRoomIdBySocket(socket.id)) {
+      emitError(socket, 'already_in_room', 'Tu es déjà dans une room');
       return;
     }
 

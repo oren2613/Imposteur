@@ -231,6 +231,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const inviteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
   const inPlayingGameRef = useRef(false);
+  const sessionKilledRef = useRef(false);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearErrorTimeout = useCallback(() => {
@@ -255,6 +256,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      if (sessionKilledRef.current) return;
       const token = getToken();
       if (token) socket.emit('authenticate', { token });
     });
@@ -366,9 +368,10 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('session_replaced', (payload: { message: string }) => {
+      sessionKilledRef.current = true;
       clearStoredSession();
       inPlayingGameRef.current = false;
-      disconnect();
+      disconnect({ permanent: true });
       setPhase('home');
       setErrorWithAutoDismiss(payload.message);
     });
@@ -452,7 +455,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     return socket;
   }, [setPhase, clearErrorTimeout, setErrorWithAutoDismiss]);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback((options?: { permanent?: boolean }) => {
     clearErrorTimeout();
     if (inviteErrorTimeoutRef.current) {
       clearTimeout(inviteErrorTimeoutRef.current);
@@ -461,6 +464,9 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     setInviteError(null);
     setOnlineFriendIds([]);
     if (socketRef.current) {
+      if (options?.permanent) {
+        socketRef.current.io.opts.reconnection = false;
+      }
       socketRef.current.disconnect();
       socketRef.current.removeAllListeners();
       socketRef.current = null;
@@ -479,7 +485,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     return () => {
-      disconnect();
+      disconnect({ permanent: true });
     };
   }, [disconnect]);
 
@@ -526,6 +532,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   const createRoom = useCallback(
     (playerName: string) => {
+      sessionKilledRef.current = false;
       setError(null);
       const trimmed = playerName.trim();
       setLocalPlayerName(trimmed);
@@ -545,6 +552,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   const joinRoom = useCallback(
     (code: string, playerName: string) => {
+      sessionKilledRef.current = false;
       setError(null);
       const trimmed = playerName.trim();
       setLocalPlayerName(trimmed);
@@ -565,6 +573,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
   const joinMatchmaking = useCallback(
     (playerName: string) => {
+      sessionKilledRef.current = false;
       setError(null);
       const trimmed = playerName.trim();
       setLocalPlayerName(trimmed);
@@ -603,7 +612,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     if (socketRef.current?.connected) {
       socketRef.current.emit('leave_room');
     }
-    disconnect();
+    disconnect({ permanent: true });
     setPhase('home');
   }, [disconnect, setPhase]);
 
