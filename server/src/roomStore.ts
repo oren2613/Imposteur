@@ -141,10 +141,23 @@ function nameTakenInRoom(room: Room, playerName: string): boolean {
   return room.members.some((m) => m.name.trim().toLowerCase() === lower);
 }
 
-function findDisconnectedMemberByName(room: Room, playerName: string): RoomMember | undefined {
+function findMemberForGamePlayer(room: Room, player: GamePlayerInternal): RoomMember | undefined {
+  return room.members.find(
+    (m) =>
+      (player.sessionId && m.sessionId === player.sessionId) ||
+      m.name.trim().toLowerCase() === player.name.trim().toLowerCase()
+  );
+}
+
+/** Membre déconnecté ou avec un socketId fantôme (onglet fermé sans nettoyage). */
+function isMemberReconnectable(member: RoomMember): boolean {
+  return member.socketId === '' || !socketToRoomId.has(member.socketId);
+}
+
+function findReconnectableMemberByName(room: Room, playerName: string): RoomMember | undefined {
   const lower = playerName.trim().toLowerCase();
   return room.members.find(
-    (m) => m.socketId === '' && m.name.trim().toLowerCase() === lower
+    (m) => m.name.trim().toLowerCase() === lower && isMemberReconnectable(m)
   );
 }
 
@@ -162,7 +175,11 @@ function attachSocketToMember(
   avatarUrl?: string | null,
   clientSessionId?: string
 ): AttachSocketResult {
-  if (member.socketId !== '' && member.socketId !== socketId) {
+  if (
+    member.socketId !== '' &&
+    member.socketId !== socketId &&
+    socketToRoomId.has(member.socketId)
+  ) {
     return { ok: false, code: 'session_active', message: 'Tu es déjà connecté ailleurs.' };
   }
 
@@ -172,7 +189,10 @@ function attachSocketToMember(
   if (member.isHost) room.hostSocketId = socketId;
   socketToRoomId.set(socketId, roomId);
 
-  if (room.status === 'playing' && room.gamePlayers) {
+  if (room.status === 'playing') {
+    if (!room.gamePlayers) {
+      return { ok: false, code: 'internal', message: 'État de partie incohérent' };
+    }
     const player = room.gamePlayers.find(
       (p) =>
         (member.sessionId && p.sessionId === member.sessionId) ||
@@ -185,6 +205,7 @@ function attachSocketToMember(
       return { ok: false, code: 'eliminated', message: 'Tu as été éliminé de cette partie.' };
     }
     player.socketId = socketId;
+    if (member.sessionId) player.sessionId = member.sessionId;
     if (avatarUrl !== undefined) player.avatarUrl = avatarUrl;
     const privateView = getPrivateView(roomId, socketId);
     if (!privateView) {
@@ -196,6 +217,10 @@ function attachSocketToMember(
       roomState: toGameState(room),
       privateView,
     };
+  }
+
+  if (room.status !== 'lobby') {
+    return { ok: false, code: 'wrong_phase', message: 'Action non autorisée' };
   }
 
   return {
@@ -489,9 +514,17 @@ export function joinRoom(
     }
   }
 
-  const byName = findDisconnectedMemberByName(room, trimmedName);
+  const byName = findReconnectableMemberByName(room, trimmedName);
   if (byName) {
     return attachSocketToMember(room, roomId, byName, socketId, avatarUrl, clientSessionId);
+  }
+
+  if (room.status === 'playing') {
+    return {
+      ok: false,
+      code: 'game_in_progress',
+      message: 'La partie est en cours. Rejoins avec le même pseudo pour reprendre ta place.',
+    };
   }
 
   if (room.members.length >= room.config.playerCount) {
@@ -622,7 +655,7 @@ export function handleDisconnect(socketId: string): HandleDisconnectResult | nul
     socketToRoomId.delete(socketId);
     if (!player) return null;
     player.socketId = '';
-    const member = room.members.find((m) => m.sessionId === player.sessionId);
+    const member = findMemberForGamePlayer(room, player);
     if (member) member.socketId = '';
     return { action: 'disconnected', roomId, roomState: toGameState(room) };
   }
@@ -664,14 +697,11 @@ export function reconnectToRoom(
     return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
   }
 
-  const member = room.members.find((m) => m.sessionId === playerSessionId);
+  const member =
+    room.members.find((m) => m.sessionId === playerSessionId) ??
+    findReconnectableMemberByName(room, _playerName);
   if (member) {
     return attachSocketToMember(room, roomId, member, socketId, avatarUrl, playerSessionId);
-  }
-
-  const byName = findDisconnectedMemberByName(room, _playerName);
-  if (byName) {
-    return attachSocketToMember(room, roomId, byName, socketId, avatarUrl, playerSessionId);
   }
 
   return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };

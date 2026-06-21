@@ -216,6 +216,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const inviteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectingRef = useRef(false);
+  const inPlayingGameRef = useRef(false);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearErrorTimeout = useCallback(() => {
@@ -316,6 +317,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
         reconnectingRef.current = false;
         setIsReconnecting(false);
       }
+      if (inPlayingGameRef.current) return;
       setPhase('onlineLobby');
     });
 
@@ -331,6 +333,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setError(null);
       setRoomId(payload.roomState.roomId);
       setGameState(payload.roomState);
+      inPlayingGameRef.current = payload.roomState.status === 'playing';
       const prev = getStoredSession();
       if (prev) {
         saveSession(prev.playerSessionId, payload.roomState.roomId, prev.playerName);
@@ -350,6 +353,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
 
     socket.on('room_closed', (payload: { code: string; message: string }) => {
       clearStoredSession();
+      inPlayingGameRef.current = false;
       setErrorWithAutoDismiss(payload.message);
       setRoomState(null);
       setGameState(null);
@@ -393,6 +397,20 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setMatchmakingQueueSize(0);
       setMatchmakingTimeoutAt(null);
       if (reconnectingRef.current) {
+        const session = getStoredSession();
+        if (
+          session?.roomId &&
+          (payload.code === 'session_not_found' || payload.code === 'session_active')
+        ) {
+          const token = getToken();
+          socket.emit('join_room', {
+            roomId: session.roomId,
+            playerName: session.playerName,
+            clientSessionId: session.playerSessionId,
+            ...(token && { authToken: token }),
+          });
+          return;
+        }
         reconnectingRef.current = false;
         setIsReconnecting(false);
         if (RECONNECT_FATAL_ERROR_CODES.has(payload.code)) {
@@ -423,6 +441,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     }
     setRoomState(null);
     setGameState(null);
+    inPlayingGameRef.current = false;
     setMyWord(null);
     setMyPlayerId(null);
     setRoomId(null);
