@@ -67,6 +67,9 @@ export function OnlineVotePanel() {
   const votedCount = voteProgress?.votedCount ?? (hasVoted ? 1 : 0);
   const eligibleCount = voteProgress?.eligibleCount ?? players.filter((p) => !p.eliminated).length;
   const progressPercent = eligibleCount > 0 ? Math.round((votedCount / eligibleCount) * 100) : 0;
+  const liveVotes = voteProgress?.votes ?? [];
+  const nameOf = (id: string): string =>
+    id === VOTE_BLANK ? 'Blanc' : (players.find((p) => p.id === id)?.name ?? '?');
 
   const handleConfirm = () => {
     if (selectedId === null || hasVoted) return;
@@ -96,6 +99,29 @@ export function OnlineVotePanel() {
           style={{ width: `${progressPercent}%` }}
         />
       </div>
+
+      {liveVotes.length > 0 && (
+        <div className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 space-y-1 max-h-28 overflow-y-auto">
+          {liveVotes.map((v) => (
+            <div key={v.voterId} className="flex items-center gap-1.5 text-xs">
+              <span className="flex-1 min-w-0 truncate text-slate-700 dark:text-slate-300">
+                {nameOf(v.voterId)}
+                {v.voterId === myPlayerId && ' (toi)'}
+              </span>
+              <span className="text-slate-400 dark:text-slate-500 shrink-0">→</span>
+              <span
+                className={`shrink-0 font-medium ${
+                  v.targetId === VOTE_BLANK
+                    ? 'text-slate-500 dark:text-slate-400'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                {nameOf(v.targetId)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {amEliminated && (
         <p className="text-center text-sm text-slate-600 dark:text-slate-400 shrink-0">

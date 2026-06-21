@@ -117,11 +117,13 @@ export interface RoomGameState {
   nextRoundCountdownEndsAt?: number | null;
   /** Fin de partie : socketIds des joueurs prêts pour la manche suivante */
   nextRoundReadySocketIds?: string[];
-  /** Phase vote : progression (sans révéler les cibles) */
+  /** Phase vote : progression + détail des cibles (révélé en direct) */
   voteProgress?: {
     votedCount: number;
     eligibleCount: number;
     votedPlayerIds: string[];
+    /** Qui a voté pour qui (targetId = 'BLANK' pour un vote blanc). Révélé en direct. */
+    votes: { voterId: string; targetId: string }[];
   };
   /** Début de la phase vote (epoch ms) */
   voteStartedAt?: number;

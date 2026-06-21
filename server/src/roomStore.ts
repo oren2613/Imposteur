@@ -406,10 +406,15 @@ function toGameState(room: Room): RoomGameState {
     const votedPlayerIds = eligible
       .filter((p) => room.votes!.has(p.id))
       .map((p) => p.id);
+    const votes = votedPlayerIds.map((voterId) => ({
+      voterId,
+      targetId: room.votes!.get(voterId)!,
+    }));
     state.voteProgress = {
       votedCount: votedPlayerIds.length,
       eligibleCount: eligible.length,
       votedPlayerIds,
+      votes,
     };
     state.voteStartedAt = room.voteStartedAt;
     state.voteDurationMs = VOTE_MAX_DURATION_MS;
@@ -1623,6 +1628,8 @@ export interface BotContext {
   clueHistory: ClueHistoryEntry[];
   /** Numéro du tour de discussion courant (1 = premier). */
   currentRound: number;
+  /** Votes déjà exprimés ce tour (révélés en direct), pour que les IA s'en servent. */
+  currentVotes: { voterName: string; targetName: string }[];
   discussionStartedAt?: number;
   currentSpeakerIndex?: number;
   voteStartedAt?: number;
@@ -1651,6 +1658,16 @@ export function getBotContext(roomId: string): BotContext | null {
   const alive = alivePlayers.map((p) => ({ id: p.id, name: p.name, isBot: p.isBot ?? false }));
   const clues = (room.clues ?? []).map((c) => ({ ...c }));
   const clueHistory = (room.clueHistory ?? []).map((c) => ({ ...c }));
+
+  const nameById = (id: string): string =>
+    room.gamePlayers!.find((p) => p.id === id)?.name ?? '?';
+  const currentVotes: { voterName: string; targetName: string }[] =
+    phase === 'vote' && room.votes
+      ? [...room.votes.entries()].map(([voterId, targetId]) => ({
+          voterName: nameById(voterId),
+          targetName: targetId === VOTE_BLANK ? 'BLANC' : nameById(targetId),
+        }))
+      : [];
 
   let currentSpeaker: BotPlayerInfo | null = null;
   if (phase === 'discussion' && room.discussionOrder) {
@@ -1689,6 +1706,7 @@ export function getBotContext(roomId: string): BotContext | null {
     clues,
     clueHistory,
     currentRound: room.discussionRound ?? 1,
+    currentVotes,
     discussionStartedAt: room.discussionStartedAt,
     currentSpeakerIndex: room.currentSpeakerIndex,
     voteStartedAt: room.voteStartedAt,

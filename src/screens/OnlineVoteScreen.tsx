@@ -218,9 +218,16 @@ export function OnlineVoteScreen() {
               .filter((p) => !p.eliminated)
               .map((p) => {
                 const isMe = p.id === myPlayerId;
+                const targetId =
+                  voteProgress?.votes.find((v) => v.voterId === p.id)?.targetId ??
+                  (isMe ? pendingVoteTarget ?? undefined : undefined);
                 const hasPlayerVoted =
                   voteProgress?.votedPlayerIds.includes(p.id) ?? (isMe && pendingVoteTarget !== null);
                 const autoBlank = hasPlayerVoted && !p.connected;
+                const targetName =
+                  targetId === VOTE_BLANK
+                    ? 'Blanc'
+                    : players.find((t) => t.id === targetId)?.name;
                 return (
                   <li
                     key={p.id}
@@ -237,9 +244,26 @@ export function OnlineVoteScreen() {
                       {isMe && ' (toi)'}
                     </span>
                     {hasPlayerVoted ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 shrink-0">
-                        <Check className="w-3.5 h-3.5" />
-                        {autoBlank ? 'Blanc (auto)' : 'A voté'}
+                      <span className="inline-flex items-center gap-1 text-xs font-medium shrink-0">
+                        {targetName ? (
+                          <>
+                            <span className="text-slate-400 dark:text-slate-500">→</span>
+                            <span
+                              className={
+                                targetId === VOTE_BLANK
+                                  ? 'text-slate-500 dark:text-slate-400'
+                                  : 'text-rose-600 dark:text-rose-400'
+                              }
+                            >
+                              {targetName}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                            <Check className="w-3.5 h-3.5" />
+                            {autoBlank ? 'Blanc (auto)' : 'A voté'}
+                          </span>
+                        )}
                       </span>
                     ) : p.connected ? (
                       <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">…</span>

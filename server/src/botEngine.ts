@@ -46,7 +46,9 @@ function clearRoomActions(roomId: string): void {
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const clueDelayMs = () => rand(2500, 6500);
-const voteDelayMs = () => rand(3000, 8000);
+// Vote : délai court mais légèrement étalé pour rester naturel et laisser les votes
+// s'enchaîner (chaque bot relit les votes déjà exprimés avant de décider).
+const voteDelayMs = () => rand(1200, 4000);
 const guessDelayMs = () => rand(3000, 6000);
 const continueDelayMs = () => rand(1500, 3500);
 
@@ -242,25 +244,41 @@ function fallbackClue(ctx: BotContext): string {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-/** Score minimal de suspicion pour qu'un Citoyen ose voter (sinon : abstention/blanc). */
-const CITIZEN_VOTE_THRESHOLD = 55;
+/**
+ * Score minimal de suspicion pour qu'un Citoyen ose voter (sinon : abstention/blanc).
+ * Adaptatif : prudent au 1er tour (on tolère l'abstention), mais décisif ensuite afin
+ * d'éviter que la partie stagne sur des votes blancs à répétition.
+ */
+function citizenVoteThreshold(ctx: BotContext): number {
+  return ctx.currentRound <= 1 ? 55 : 35;
+}
+
+/** Liste lisible des votes déjà exprimés ce tour, pour influencer la décision. */
+function votesToText(ctx: BotContext): string {
+  if (ctx.currentVotes.length === 0) {
+    return '(personne n\'a encore voté : tu es parmi les premiers)';
+  }
+  return ctx.currentVotes.map((v) => `- ${v.voterName} → ${v.targetName}`).join('\n');
+}
 
 function buildVoteStrategy(bot: BotPlayerInfo, ctx: BotContext): string {
   const late = maxRound(ctx) >= 2;
   if (bot.role === 'imposteur') {
     return `Ton rôle : IMPOSTEUR (ton mot est « ${bot.word} », différent de celui des Citoyens). Tu veux SURVIVRE.
 À partir de l'historique, devine le mot des Citoyens, puis repère le Citoyen le plus crédible/menaçant.
-${late ? 'Tu te sens peut-être visé : oriente le vote vers ce Citoyen menaçant pour te protéger.' : "Reste discret : vote pour un joueur déjà suspect aux yeux du groupe, ou BLANC si c'est plus prudent."}
+Sers-toi des votes déjà exprimés : si des joueurs ciblent déjà quelqu'un (surtout pas toi), suis le mouvement pour te fondre dans la masse. Si TU es ciblé, riposte en orientant le vote vers un Citoyen menaçant.
+${late ? 'On avance dans la partie : sois décisif, évite le vote blanc.' : ''}
 Ne te désigne JAMAIS.`;
   }
   if (bot.role === 'mrWhite') {
     return `Ton rôle : MR. WHITE (sans mot). Tu veux SURVIVRE.
-Fonds-toi dans la masse : vote pour un joueur dont l'indice détonne, ou pour détourner les soupçons d'un Citoyen crédible. Vote BLANC si tu n'as aucune certitude.
+Fonds-toi dans la masse : appuie-toi sur les votes déjà exprimés pour suivre un mouvement existant (sauf s'il te vise), ou vote pour un joueur dont l'indice détonne.
 Ne te désigne JAMAIS.`;
   }
   return `Ton rôle : CITOYEN (ton mot est « ${bot.word} »). Tu veux éliminer l'Imposteur ou Mr. White.
 Repère le joueur dont les indices collent le moins à « ${bot.word} » (hors-sujet, trop vague, ou répétition suspecte).
-Ne vote contre quelqu'un que s'il se démarque NETTEMENT comme suspect ; sinon vote BLANC (mieux vaut s'abstenir que d'accuser au hasard).`;
+Tiens compte des votes déjà exprimés : un consensus naissant sur un suspect crédible est un bon signal à suivre, mais ne te fais pas manipuler vers un Citoyen visiblement innocent.
+${late ? "On a déjà voté sans rien trancher : sois DÉCISIF ce tour, désigne ton meilleur suspect plutôt que de voter blanc." : 'Si vraiment personne ne se démarque, vote BLANC.'}`;
 }
 
 /** Associe une réponse (prénom ou « blanc ») à un playerId, à VOTE_BLANK, ou null si introuvable. */
@@ -298,6 +316,23 @@ function parseVoteJson(raw: string | null): VoteAnalysis | null {
   }
 }
 
+/** Joueur votable au score de suspicion le plus élevé (>0), ou null si aucun. */
+function mostSuspect(
+  analysis: VoteAnalysis,
+  others: { id: string; name: string }[]
+): string | null {
+  let bestId: string | null = null;
+  let bestScore = 0;
+  for (const o of others) {
+    const score = suspicionFor(analysis, o.name);
+    if (score !== null && score > bestScore) {
+      bestScore = score;
+      bestId = o.id;
+    }
+  }
+  return bestId;
+}
+
 /** Retrouve le score de suspicion attribué à un joueur dans l'analyse. */
 function suspicionFor(analysis: VoteAnalysis, name: string): number | null {
   if (!analysis.scores) return null;
@@ -323,10 +358,13 @@ async function decideVote(bot: BotPlayerInfo, ctx: BotContext): Promise<string> 
 Historique complet des indices (le 1er tour est le plus révélateur, mais ton avis peut évoluer avec la suite) :
 ${historyToText(ctx)}
 
+Votes déjà exprimés ce tour (en direct) :
+${votesToText(ctx)}
+
 Joueurs encore en jeu (tu ne peux voter que contre eux) :
 ${others.map((p) => `- ${p.name}`).join('\n')}
 
-Analyse : déduis le mot probable des Citoyens, puis attribue à CHAQUE joueur ci-dessus un score de suspicion de 0 (parfaitement cohérent/innocent) à 100 (très suspect). Récompense les indices indirects mais justes (faible suspicion) ; pénalise les indices hors-sujet, trop vagues ou répétés.
+Analyse : déduis le mot probable des Citoyens, puis attribue à CHAQUE joueur ci-dessus un score de suspicion de 0 (parfaitement cohérent/innocent) à 100 (très suspect). Récompense les indices indirects mais justes (faible suspicion) ; pénalise les indices hors-sujet, trop vagues ou répétés. Tiens compte des votes déjà exprimés ci-dessus.
 Puis choisis ton vote selon ta stratégie de rôle.
 
 Réponds UNIQUEMENT en JSON valide, sans aucun texte autour, au format :
@@ -335,19 +373,26 @@ Réponds UNIQUEMENT en JSON valide, sans aucun texte autour, au format :
   ];
 
   const analysis = parseVoteJson(
-    await groqChat(messages, { temperature: 0.5, maxTokens: 400, json: true })
+    await groqChat(messages, { temperature: 0.5, maxTokens: 320, json: true })
   );
   if (!analysis) return fallbackVote(bot, others);
 
   const target = matchVoteTarget(analysis.vote ?? null, others);
   if (target === null) return fallbackVote(bot, others);
-  if (target === VOTE_BLANK) return VOTE_BLANK;
+  if (target === VOTE_BLANK) {
+    // Anti-stagnation : passé le 1er tour, un Citoyen ne s'abstient pas s'il a un suspect net.
+    if (bot.role === 'citoyen' && ctx.currentRound > 1) {
+      const best = mostSuspect(analysis, others);
+      if (best) return best;
+    }
+    return VOTE_BLANK;
+  }
 
   // Garde-fou citoyen : ne pas accuser sans certitude suffisante (abstention si le score est trop bas).
   if (bot.role === 'citoyen') {
     const name = others.find((o) => o.id === target)?.name ?? '';
     const score = suspicionFor(analysis, name);
-    if (score !== null && score < CITIZEN_VOTE_THRESHOLD) return VOTE_BLANK;
+    if (score !== null && score < citizenVoteThreshold(ctx)) return VOTE_BLANK;
   }
   return target;
 }
