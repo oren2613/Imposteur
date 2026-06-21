@@ -31,6 +31,20 @@ interface PlayerStats {
   wins: number;
 }
 
+/**
+ * Indice mémorisé pour le raisonnement des IA : conserve le numéro de tour pour
+ * permettre une pondération chronologique (le 1er indice compte le plus). Cet
+ * historique persiste sur toute la manche (contrairement à `room.clues` qui est
+ * réinitialisé à chaque cycle de discussion et sert uniquement à l'affichage).
+ */
+export interface ClueHistoryEntry {
+  /** Numéro du tour de discussion (1 = premier tour de la manche). */
+  round: number;
+  playerId: string;
+  name: string;
+  text: string;
+}
+
 /** Room interne : lobby ou en partie */
 export type RoomVisibility = 'public' | 'private';
 
@@ -57,6 +71,10 @@ interface Room {
   winner?: Winner | null;
   /** Indices écrits de la discussion en cours (réinitialisés à chaque discussion) */
   clues?: ClueEntry[];
+  /** Historique complet des indices de la manche (tous les tours), pour la mémoire des IA. */
+  clueHistory?: ClueHistoryEntry[];
+  /** Numéro du tour de discussion courant (1 = premier). Incrémenté à chaque nouveau cycle. */
+  discussionRound?: number;
   /** Votes du tour courant : playerId → targetPlayerId */
   votes?: Map<string, string>;
   /** Début de la phase vote (epoch ms) pour timer 30 s */
@@ -937,6 +955,8 @@ export function startGameInternal(roomId: string): StartGameResult {
   room.gamePlayers = gamePlayers;
   room.wordPair = wordPair;
   room.roleRevealAcked = new Set();
+  room.clueHistory = [];
+  room.discussionRound = 0;
 
   return { ok: true, roomState: toGameState(room) };
 }
@@ -966,6 +986,7 @@ export function transitionRoleRevealToDiscussion(roomId: string): RoomGameState 
   const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
   room.clues = [];
+  room.discussionRound = (room.discussionRound ?? 0) + 1;
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
   room.turnStartedAt = Date.now();
@@ -1026,6 +1047,7 @@ export function roleRevealAck(
   const aliveIds = room.gamePlayers!.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
   room.clues = [];
+  room.discussionRound = (room.discussionRound ?? 0) + 1;
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
   room.turnStartedAt = Date.now();
@@ -1083,6 +1105,7 @@ function resolveVotePhase(room: Room): RoomGameState {
     const aliveIds = room.gamePlayers!.filter((p) => !p.eliminated).map((p) => p.id);
     room.phase = 'discussion';
     room.clues = [];
+    room.discussionRound = (room.discussionRound ?? 0) + 1;
     room.discussionOrder = shuffle(aliveIds);
     room.currentSpeakerIndex = 0;
     room.turnStartedAt = Date.now();
@@ -1258,6 +1281,8 @@ function recordClue(room: Room, playerId: string, name: string, text: string): v
   if (!trimmed) return;
   if (!room.clues) room.clues = [];
   room.clues.push({ playerId, name, text: trimmed });
+  if (!room.clueHistory) room.clueHistory = [];
+  room.clueHistory.push({ round: room.discussionRound ?? 1, playerId, name, text: trimmed });
 }
 
 export type SubmitClueResult =
@@ -1440,6 +1465,7 @@ export function continueAfterEliminated(
   const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
   room.clues = [];
+  room.discussionRound = (room.discussionRound ?? 0) + 1;
   room.eliminatedPlayerId = null;
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
@@ -1593,6 +1619,10 @@ export interface BotContext {
   phase: GamePhase;
   alive: { id: string; name: string; isBot: boolean }[];
   clues: ClueEntry[];
+  /** Historique complet des indices de la manche (tous les tours) pour la mémoire des IA. */
+  clueHistory: ClueHistoryEntry[];
+  /** Numéro du tour de discussion courant (1 = premier). */
+  currentRound: number;
   discussionStartedAt?: number;
   currentSpeakerIndex?: number;
   voteStartedAt?: number;
@@ -1620,6 +1650,7 @@ export function getBotContext(roomId: string): BotContext | null {
   const alivePlayers = room.gamePlayers.filter((p) => !p.eliminated);
   const alive = alivePlayers.map((p) => ({ id: p.id, name: p.name, isBot: p.isBot ?? false }));
   const clues = (room.clues ?? []).map((c) => ({ ...c }));
+  const clueHistory = (room.clueHistory ?? []).map((c) => ({ ...c }));
 
   let currentSpeaker: BotPlayerInfo | null = null;
   if (phase === 'discussion' && room.discussionOrder) {
@@ -1656,6 +1687,8 @@ export function getBotContext(roomId: string): BotContext | null {
     phase,
     alive,
     clues,
+    clueHistory,
+    currentRound: room.discussionRound ?? 1,
     discussionStartedAt: room.discussionStartedAt,
     currentSpeakerIndex: room.currentSpeakerIndex,
     voteStartedAt: room.voteStartedAt,
@@ -1727,6 +1760,7 @@ export function applyBotContinueAfterEliminated(roomId: string, playerId: string
   const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
   room.clues = [];
+  room.discussionRound = (room.discussionRound ?? 0) + 1;
   room.eliminatedPlayerId = null;
   room.discussionOrder = shuffle(aliveIds);
   room.currentSpeakerIndex = 0;
@@ -1763,6 +1797,8 @@ function clearGameState(room: Room): void {
   room.eliminatedPlayerId = undefined;
   room.winner = undefined;
   room.clues = undefined;
+  room.clueHistory = undefined;
+  room.discussionRound = undefined;
   room.votes = undefined;
   room.voteStartedAt = undefined;
   room.discussionOrder = undefined;
@@ -1880,6 +1916,8 @@ export function startNextRoundInternal(
   room.gamePlayers = gamePlayers;
   room.wordPair = wordPair;
   room.roleRevealAcked = new Set();
+  room.clueHistory = [];
+  room.discussionRound = 0;
   return { ok: true, roomState: toGameState(room) };
 }
 
@@ -1958,6 +1996,8 @@ interface PersistedRoom {
   eliminatedPlayerId?: string | null;
   winner?: Winner | null;
   clues?: ClueEntry[];
+  clueHistory?: ClueHistoryEntry[];
+  discussionRound?: number;
   votes?: [string, string][];
   voteStartedAt?: number;
   discussionOrder?: string[];
@@ -1989,6 +2029,8 @@ function roomToPersisted(room: Room): PersistedRoom {
     eliminatedPlayerId: room.eliminatedPlayerId,
     winner: room.winner,
     clues: room.clues ? room.clues.map((c) => ({ ...c })) : undefined,
+    clueHistory: room.clueHistory ? room.clueHistory.map((c) => ({ ...c })) : undefined,
+    discussionRound: room.discussionRound,
     votes: room.votes ? [...room.votes.entries()] : undefined,
     voteStartedAt: room.voteStartedAt,
     discussionOrder: room.discussionOrder,
@@ -2034,6 +2076,8 @@ function persistedToRoom(data: PersistedRoom): Room {
     eliminatedPlayerId: data.eliminatedPlayerId,
     winner: data.winner ?? null,
     clues: data.clues ? data.clues.map((c) => ({ ...c })) : undefined,
+    clueHistory: data.clueHistory ? data.clueHistory.map((c) => ({ ...c })) : undefined,
+    discussionRound: data.discussionRound,
     votes: data.votes ? new Map(data.votes) : undefined,
     voteStartedAt: data.voteStartedAt,
     discussionOrder: data.discussionOrder,

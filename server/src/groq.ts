@@ -16,6 +16,8 @@ export interface GroqChatOptions {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** Force une réponse JSON (response_format json_object). */
+  json?: boolean;
 }
 
 /** True si une clé API Groq est configurée. */
@@ -48,6 +50,7 @@ export async function groqChat(
         messages,
         temperature: opts.temperature ?? 0.8,
         max_tokens: opts.maxTokens ?? 80,
+        ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
       }),
       signal: controller.signal,
     });

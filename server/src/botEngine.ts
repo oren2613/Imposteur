@@ -142,26 +142,61 @@ Règles : les Citoyens partagent un mot secret commun. L'Imposteur a un mot proc
 À chaque tour, chacun donne UN indice (un mot ou une très courte expression) en rapport avec son mot, sans jamais dire le mot lui-même.
 Les Citoyens veulent démasquer l'Imposteur et Mr. White en repérant les indices qui détonnent.
 L'Imposteur et Mr. White veulent se fondre dans la masse sans se faire repérer.
-Tu te comportes comme un vrai joueur humain, naturel et stratégique. Tu réponds toujours en français, de façon très concise.`;
 
-function cluesToText(ctx: BotContext): string {
-  if (ctx.clues.length === 0) {
-    return "(aucun indice pour l'instant : tu es parmi les premiers à parler)";
-  }
-  return ctx.clues.map((c) => `- ${c.name} : ${c.text}`).join('\n');
+Raisonne comme un vrai joueur humain, fin et stratégique :
+- Tu as de la MÉMOIRE : prends en compte TOUS les indices des tours précédents, pas seulement le dernier.
+- Comprends les indices indirects et les jeux de mots (ex : « mario » peut évoquer « banane » via le champignon/le jeu). Un indice détourné mais qui colle au mot n'est PAS suspect, au contraire.
+- Le 1er indice d'un joueur est le plus révélateur, mais ce n'est pas décisif : un bon indice plus tard peut le disculper, un mauvais peut le trahir. Ton avis évolue.
+- Répéter mot pour mot un indice déjà donné est un peu louche (signe d'un joueur qui n'a pas le mot).
+Tu réponds toujours en français, de façon très concise.`;
+
+/** Numéro de tour le plus élevé déjà présent dans l'historique. */
+function maxRound(ctx: BotContext): number {
+  return ctx.clueHistory.reduce((m, c) => Math.max(m, c.round), 0);
 }
 
-function buildClueStrategy(bot: BotPlayerInfo): string {
+/** Historique complet groupé par tour, pour donner de la mémoire à l'IA. */
+function historyToText(ctx: BotContext): string {
+  if (ctx.clueHistory.length === 0) {
+    return "(aucun indice pour l'instant : tu es parmi les premiers à parler)";
+  }
+  const rounds = [...new Set(ctx.clueHistory.map((c) => c.round))].sort((a, b) => a - b);
+  return rounds
+    .map((r) => {
+      const line = ctx.clueHistory
+        .filter((c) => c.round === r)
+        .map((c) => `  - ${c.name} : ${c.text}`)
+        .join('\n');
+      return `Tour ${r} :\n${line}`;
+    })
+    .join('\n');
+}
+
+/** Ensemble (minuscule) de tous les indices déjà donnés sur la manche. */
+function usedCluesLower(ctx: BotContext): Set<string> {
+  return new Set(ctx.clueHistory.map((c) => c.text.toLowerCase()));
+}
+
+function buildClueStrategy(bot: BotPlayerInfo, ctx: BotContext): string {
+  const late = maxRound(ctx) >= 2;
   if (bot.role === 'imposteur') {
-    return `Ton rôle : IMPOSTEUR. Ton mot est « ${bot.word} » (il est différent du mot des Citoyens).
-Objectif : ne PAS te faire repérer. Donne un indice prudent et un peu vague, cohérent avec les indices déjà donnés, qui pourrait coller à plusieurs mots du même thème. Évite d'être trop précis.`;
+    return `Ton rôle : IMPOSTEUR. Ton mot est « ${bot.word} » (proche mais DIFFÉRENT du mot des Citoyens).
+- Sers-toi des indices des joueurs qui semblent sincères pour DEVINER le vrai mot des Citoyens.
+- Donne un indice qui colle à ce mot deviné (pas forcément au tien) pour te fondre dans la masse.
+- ${late ? "On avance dans la partie : tu peux être un peu plus précis et, si tu te sens visé, orienter discrètement les soupçons vers un Citoyen crédible." : 'Début de partie : reste prudent et un peu vague, ne te démarque pas.'}
+- Ne révèle jamais que ton mot diffère.`;
   }
   if (bot.role === 'mrWhite') {
     return `Ton rôle : MR. WHITE. Tu n'as AUCUN mot.
-Objectif : devine le thème à partir des indices des autres et donne un indice plausible qui ne te trahit pas. Si tu n'es pas sûr, reste vague et générique.`;
+- Déduis À TOUT PRIX le mot des Citoyens à partir des indices des joueurs qui semblent sincères.
+- Donne un indice plausible : un SYNONYME ou une association proche des indices déjà donnés par ceux que tu penses Citoyens, sans recopier un indice existant.
+- ${late ? "Tu commences à cerner le thème : ose un indice un peu plus ciblé, mais sans te trahir." : "Tu n'as encore que peu d'indices : reste générique et plausible."}`;
   }
   return `Ton rôle : CITOYEN. Ton mot secret est « ${bot.word} ».
-Objectif : montrer subtilement aux autres Citoyens que tu connais le mot, SANS le rendre trop évident (l'Imposteur ou Mr. White pourrait le deviner). Donne un indice lié à « ${bot.word} » mais pas trop direct.`;
+- Donne un indice lié à « ${bot.word} » : un mot ou une très courte expression.
+- Tu peux être malin/indirect (association, jeu de mots) tant que ça reste rattachable à « ${bot.word} ».
+- Ne sois PAS trop évident (l'Imposteur ou Mr. White pourrait deviner le mot).
+- Reste cohérent avec tes propres indices passés et avec le thème déjà installé.`;
 }
 
 /** Nettoie une réponse IA pour en faire un indice court (1 à 3 mots). */
@@ -180,40 +215,55 @@ async function generateClue(bot: BotPlayerInfo, ctx: BotContext): Promise<string
     { role: 'system', content: SYSTEM_RULES },
     {
       role: 'user',
-      content: `${buildClueStrategy(bot)}
+      content: `${buildClueStrategy(bot, ctx)}
 
-Indices déjà donnés ce tour :
-${cluesToText(ctx)}
+Historique des indices (du plus ancien au plus récent) :
+${historyToText(ctx)}
 
-Donne TON indice : un seul mot ou une très courte expression (3 mots maximum), en français. Ne répète pas un indice déjà donné. N'écris QUE l'indice, sans ponctuation ni explication.`,
+Donne TON indice pour ce tour : un seul mot ou une très courte expression (3 mots maximum), en français.
+IMPORTANT : ne répète AUCUN indice déjà donné ci-dessus (ni le tien, ni celui d'un autre, à aucun tour). Apporte quelque chose de nouveau.
+N'écris QUE l'indice, sans ponctuation ni explication.`,
     },
   ];
-  const clue = sanitizeClue(await groqChat(messages, { temperature: 0.9, maxTokens: 12 }));
-  return clue || fallbackClue(ctx);
+  const raw = sanitizeClue(await groqChat(messages, { temperature: 0.85, maxTokens: 16 }));
+  // Garde-fou anti-répétition : si l'IA recopie un indice existant (ou échoue), on bascule sur un repli non répété.
+  if (!raw || usedCluesLower(ctx).has(raw.toLowerCase())) {
+    return fallbackClue(ctx);
+  }
+  return raw;
 }
 
-/** Repli sans IA : un indice générique non révélateur (mieux que de rester muet). */
+/** Repli sans IA : un indice générique non répété (mieux que de rester muet). */
 function fallbackClue(ctx: BotContext): string {
-  const generic = ['intéressant', 'classique', 'courant', 'pareil', 'logique', 'pas évident'];
-  const used = new Set(ctx.clues.map((c) => c.text.toLowerCase()));
+  const generic = ['intéressant', 'classique', 'courant', 'logique', 'pas évident', 'connu', 'banal', 'particulier'];
+  const used = usedCluesLower(ctx);
   const available = generic.filter((g) => !used.has(g));
-  return (available.length ? available : generic)[Math.floor(Math.random() * (available.length ? available.length : generic.length))];
+  const pool = available.length ? available : generic;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function buildVoteStrategy(bot: BotPlayerInfo): string {
+/** Score minimal de suspicion pour qu'un Citoyen ose voter (sinon : abstention/blanc). */
+const CITIZEN_VOTE_THRESHOLD = 55;
+
+function buildVoteStrategy(bot: BotPlayerInfo, ctx: BotContext): string {
+  const late = maxRound(ctx) >= 2;
   if (bot.role === 'imposteur') {
-    return `Ton rôle : IMPOSTEUR (ton mot est « ${bot.word} »). Tu veux SURVIVRE.
-Détourne les soupçons : vote pour un joueur que le groupe pourrait déjà suspecter, ou vote blanc si c'est plus prudent. Ne te désigne jamais.`;
+    return `Ton rôle : IMPOSTEUR (ton mot est « ${bot.word} », différent de celui des Citoyens). Tu veux SURVIVRE.
+À partir de l'historique, devine le mot des Citoyens, puis repère le Citoyen le plus crédible/menaçant.
+${late ? 'Tu te sens peut-être visé : oriente le vote vers ce Citoyen menaçant pour te protéger.' : "Reste discret : vote pour un joueur déjà suspect aux yeux du groupe, ou BLANC si c'est plus prudent."}
+Ne te désigne JAMAIS.`;
   }
   if (bot.role === 'mrWhite') {
     return `Ton rôle : MR. WHITE (sans mot). Tu veux SURVIVRE.
-Vote pour quelqu'un d'autre afin de te fondre dans la masse, idéalement un joueur dont l'indice semble suspect. Vote blanc si tu n'as aucune idée.`;
+Fonds-toi dans la masse : vote pour un joueur dont l'indice détonne, ou pour détourner les soupçons d'un Citoyen crédible. Vote BLANC si tu n'as aucune certitude.
+Ne te désigne JAMAIS.`;
   }
   return `Ton rôle : CITOYEN (ton mot est « ${bot.word} »). Tu veux éliminer l'Imposteur ou Mr. White.
-Repère le joueur dont l'indice colle le moins à « ${bot.word} » ou reste le plus vague, et vote contre lui. Vote blanc seulement si rien ne ressort.`;
+Repère le joueur dont les indices collent le moins à « ${bot.word} » (hors-sujet, trop vague, ou répétition suspecte).
+Ne vote contre quelqu'un que s'il se démarque NETTEMENT comme suspect ; sinon vote BLANC (mieux vaut s'abstenir que d'accuser au hasard).`;
 }
 
-/** Associe la réponse IA à un playerId, à VOTE_BLANK, ou null si introuvable. */
+/** Associe une réponse (prénom ou « blanc ») à un playerId, à VOTE_BLANK, ou null si introuvable. */
 function matchVoteTarget(raw: string | null, others: { id: string; name: string }[]): string | null {
   if (!raw) return null;
   const low = raw.toLowerCase();
@@ -226,6 +276,40 @@ function matchVoteTarget(raw: string | null, others: { id: string; name: string 
   return null;
 }
 
+interface VoteAnalysis {
+  mot_probable?: string;
+  scores?: { joueur?: string; suspicion?: number }[];
+  vote?: string;
+}
+
+/** Parse une réponse JSON éventuellement entourée de texte. */
+function parseVoteJson(raw: string | null): VoteAnalysis | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as VoteAnalysis;
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]) as VoteAnalysis;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** Retrouve le score de suspicion attribué à un joueur dans l'analyse. */
+function suspicionFor(analysis: VoteAnalysis, name: string): number | null {
+  if (!analysis.scores) return null;
+  const low = name.toLowerCase();
+  for (const s of analysis.scores) {
+    if (s.joueur && s.joueur.toLowerCase().includes(low) && typeof s.suspicion === 'number') {
+      return s.suspicion;
+    }
+  }
+  return null;
+}
+
 async function decideVote(bot: BotPlayerInfo, ctx: BotContext): Promise<string> {
   const others = ctx.alive.filter((p) => p.id !== bot.playerId);
   if (others.length === 0) return VOTE_BLANK;
@@ -234,20 +318,38 @@ async function decideVote(bot: BotPlayerInfo, ctx: BotContext): Promise<string> 
     { role: 'system', content: SYSTEM_RULES },
     {
       role: 'user',
-      content: `${buildVoteStrategy(bot)}
+      content: `${buildVoteStrategy(bot, ctx)}
 
-Indices donnés pendant la partie :
-${cluesToText(ctx)}
+Historique complet des indices (le 1er tour est le plus révélateur, mais ton avis peut évoluer avec la suite) :
+${historyToText(ctx)}
 
-Joueurs encore en jeu :
+Joueurs encore en jeu (tu ne peux voter que contre eux) :
 ${others.map((p) => `- ${p.name}`).join('\n')}
 
-Qui veux-tu éliminer ? Réponds UNIQUEMENT par le prénom exact d'un joueur de la liste, ou par "BLANC" pour ne désigner personne.`,
+Analyse : déduis le mot probable des Citoyens, puis attribue à CHAQUE joueur ci-dessus un score de suspicion de 0 (parfaitement cohérent/innocent) à 100 (très suspect). Récompense les indices indirects mais justes (faible suspicion) ; pénalise les indices hors-sujet, trop vagues ou répétés.
+Puis choisis ton vote selon ta stratégie de rôle.
+
+Réponds UNIQUEMENT en JSON valide, sans aucun texte autour, au format :
+{"mot_probable":"<mot>","scores":[{"joueur":"<prénom>","suspicion":<0-100>}],"vote":"<prénom exact d'un joueur ou BLANC>"}`,
     },
   ];
-  const target = matchVoteTarget(await groqChat(messages, { temperature: 0.6, maxTokens: 10 }), others);
-  if (target) return target;
-  return fallbackVote(bot, others);
+
+  const analysis = parseVoteJson(
+    await groqChat(messages, { temperature: 0.5, maxTokens: 400, json: true })
+  );
+  if (!analysis) return fallbackVote(bot, others);
+
+  const target = matchVoteTarget(analysis.vote ?? null, others);
+  if (target === null) return fallbackVote(bot, others);
+  if (target === VOTE_BLANK) return VOTE_BLANK;
+
+  // Garde-fou citoyen : ne pas accuser sans certitude suffisante (abstention si le score est trop bas).
+  if (bot.role === 'citoyen') {
+    const name = others.find((o) => o.id === target)?.name ?? '';
+    const score = suspicionFor(analysis, name);
+    if (score !== null && score < CITIZEN_VOTE_THRESHOLD) return VOTE_BLANK;
+  }
+  return target;
 }
 
 /** Repli sans IA : l'imposteur/Mr White se met en retrait (blanc), le citoyen tente sa chance. */
@@ -261,10 +363,11 @@ async function generateGuess(ctx: BotContext): Promise<string> {
     { role: 'system', content: SYSTEM_RULES },
     {
       role: 'user',
-      content: `Tu es Mr. White et tu viens d'être éliminé. Dernière chance : devine le mot secret des Citoyens à partir des indices donnés.
+      content: `Tu es Mr. White et tu viens d'être éliminé. Dernière chance : devine le mot secret des Citoyens.
+Sers-toi de TOUT l'historique ci-dessous. Cherche le mot commun derrière ces indices, en tenant compte des associations et jeux de mots (ex : si les indices pointent indirectement vers une chose précise, trouve-la).
 
-Indices :
-${cluesToText(ctx)}
+Historique des indices :
+${historyToText(ctx)}
 
 Quel est, selon toi, le mot des Citoyens ? Réponds UNIQUEMENT par un seul mot, sans ponctuation.`,
     },
