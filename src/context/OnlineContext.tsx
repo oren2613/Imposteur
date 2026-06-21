@@ -36,16 +36,30 @@ interface StoredSession {
   playerName: string;
 }
 
-function getStoredSession(): StoredSession | null {
+/**
+ * Lit la session brute (roomId peut être vide : cas create_room / matchmaking
+ * où le code n'est pas encore attribué). Sert à mettre à jour la session.
+ */
+function getRawStoredSession(): StoredSession | null {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as StoredSession;
-    if (!s?.playerSessionId || !s?.roomId || !s?.playerName) return null;
+    if (!s?.playerSessionId || !s?.playerName) return null;
     return s;
   } catch {
     return null;
   }
+}
+
+/**
+ * Session exploitable pour une reconnexion : nécessite un roomId.
+ * Utilisée par l'effet de reconnexion et l'UI de reprise.
+ */
+function getStoredSession(): StoredSession | null {
+  const s = getRawStoredSession();
+  if (!s || !s.roomId) return null;
+  return s;
 }
 
 function resolveSessionId(roomId: string, playerName: string): string {
@@ -290,7 +304,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setError(null);
       setIsMatchmaking(false);
       setMatchmakingQueueSize(0);
-      const prev = getStoredSession();
+      const prev = getRawStoredSession();
       if (prev) saveSession(prev.playerSessionId, payload.roomId, prev.playerName);
       setRoomId(payload.roomId);
       setRoomState(payload.roomState);
@@ -308,7 +322,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setPendingInvite(null);
       setIsMatchmaking(false);
       setMatchmakingQueueSize(0);
-      const prevJoin = getStoredSession();
+      const prevJoin = getRawStoredSession();
       if (prevJoin) saveSession(prevJoin.playerSessionId, payload.roomId, prevJoin.playerName);
       setRoomId(payload.roomId);
       setRoomState(payload.roomState);
@@ -334,7 +348,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setRoomId(payload.roomState.roomId);
       setGameState(payload.roomState);
       inPlayingGameRef.current = payload.roomState.status === 'playing';
-      const prev = getStoredSession();
+      const prev = getRawStoredSession();
       if (prev) {
         saveSession(prev.playerSessionId, payload.roomState.roomId, prev.playerName);
       }
