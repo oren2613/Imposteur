@@ -33,6 +33,7 @@ import {
   advanceDiscussionIfSpeakerDisconnected,
   forceDiscussionToVoteIfTimeout,
   getDiscussionRoomIds,
+  advanceDiscussionToVoteIfComplete,
   getVoteRoomIds,
   forceVoteIfTimeout,
   getRoomHostName,
@@ -1070,6 +1071,11 @@ const DISCUSSION_TIMEOUT_CHECK_MS = 5000;
 setInterval(() => {
   const roomIds = getDiscussionRoomIds();
   for (const roomId of roomIds) {
+    const completeState = advanceDiscussionToVoteIfComplete(roomId);
+    if (completeState) {
+      io.to(roomId).emit('game_state', { roomState: completeState });
+      continue;
+    }
     const timeoutState = forceDiscussionToVoteIfTimeout(roomId);
     if (timeoutState) {
       io.to(roomId).emit('game_state', { roomState: timeoutState });

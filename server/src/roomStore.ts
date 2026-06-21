@@ -1110,6 +1110,21 @@ export function advanceDiscussionIfSpeakerDisconnected(
   return toGameState(room);
 }
 
+/**
+ * Si tous les joueurs ont parlé mais la phase est encore « discussion », lancer le vote.
+ * Filet de sécurité (ex. reprise après élimination sans reset d'index).
+ */
+export function advanceDiscussionToVoteIfComplete(roomId: string): RoomGameState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'discussion' || !room.discussionOrder) {
+    return null;
+  }
+  const idx = room.currentSpeakerIndex ?? 0;
+  if (idx < room.discussionOrder.length) return null;
+  const finalized = beginVotePhase(room);
+  return finalized ?? toGameState(room);
+}
+
 /** Liste des roomId en phase discussion (pour le tick de timeout orateur déconnecté) */
 export function getDiscussionRoomIds(): string[] {
   const ids: string[] = [];
@@ -1210,8 +1225,12 @@ export function continueAfterEliminated(
   if (!player || player.eliminated) {
     return { ok: false, code: 'not_a_player', message: 'Action non autorisée' };
   }
+  const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
   room.phase = 'discussion';
   room.eliminatedPlayerId = null;
+  room.discussionOrder = shuffle(aliveIds);
+  room.currentSpeakerIndex = 0;
+  room.turnStartedAt = Date.now();
   room.discussionStartedAt = Date.now();
   return { ok: true, roomState: toGameState(room) };
 }
