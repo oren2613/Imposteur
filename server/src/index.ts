@@ -60,6 +60,9 @@ import {
   tryFormMatchmaking,
   getAllMatchmakingSocketIds,
   getMatchmakingQueueSize,
+  addBotToQueueIfWaiting,
+  scheduleMatchmakingTimeout,
+  BOTS_ENABLED,
   MATCH_TARGET,
   MATCH_MIN,
   setMatchmakingTimeoutHandler,
@@ -352,11 +355,21 @@ const io = new Server(httpServer, {
 setBotBroadcast((roomId, roomState) => broadcastGameState(roomId, roomState));
 
 setMatchmakingTimeoutHandler(() => {
-  // Attente trop longue : compléter avec des bots (ou match humain forcé si bots désactivés).
-  const match = tryFormMatchmaking({ fillWithBots: true, forceMin: true });
-  void applyMatchmakingMatch(match).then(() => {
+  if (BOTS_ENABLED) {
+    // Toutes les 20 s : on ajoute un joueur IA, on forme si la room est pleine,
+    // puis on replanifie tant qu'un humain attend.
+    addBotToQueueIfWaiting();
     broadcastMatchmakingUpdate();
-  });
+    const match = tryFormMatchmaking();
+    if (match) {
+      void applyMatchmakingMatch(match).then(() => broadcastMatchmakingUpdate());
+    }
+    scheduleMatchmakingTimeout();
+  } else {
+    // Sans bots : match humain forcé à 3+.
+    const match = tryFormMatchmaking({ forceMin: true });
+    void applyMatchmakingMatch(match).then(() => broadcastMatchmakingUpdate());
+  }
 });
 
 /** Timers de countdown roleReveal → discussion (roomId → timeout) */
