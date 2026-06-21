@@ -79,6 +79,8 @@ const NAME_MAX_LENGTH = 30;
 
 const rooms = new Map<string, Room>();
 const socketToRoomId = new Map<string, string>();
+/** Sockets remplacés par une nouvelle connexion (ne pas traiter comme déconnexion joueur). */
+const replacingSockets = new Set<string>();
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -164,9 +166,19 @@ function findReconnectableMemberByName(room: Room, playerName: string): RoomMemb
 }
 
 type AttachSocketResult =
-  | { ok: true; kind: 'lobby'; roomState: RoomLobbyState; youAreHost: boolean }
-  | { ok: true; kind: 'playing'; roomState: RoomGameState; privateView: PlayerPrivateView & { playerId: string } }
+  | { ok: true; kind: 'lobby'; roomState: RoomLobbyState; youAreHost: boolean; replacedSocketId?: string }
+  | { ok: true; kind: 'playing'; roomState: RoomGameState; privateView: PlayerPrivateView & { playerId: string }; replacedSocketId?: string }
   | { ok: false; code: string; message: string };
+
+export function markSocketBeingReplaced(socketId: string): void {
+  replacingSockets.add(socketId);
+}
+
+export function consumeSocketBeingReplaced(socketId: string): boolean {
+  if (!replacingSockets.has(socketId)) return false;
+  replacingSockets.delete(socketId);
+  return true;
+}
 
 /** Réassocie un socket à un membre existant (reconnexion ou reprise de place). */
 function attachSocketToMember(
@@ -177,12 +189,16 @@ function attachSocketToMember(
   avatarUrl?: string | null,
   clientSessionId?: string
 ): AttachSocketResult {
-  if (
-    member.socketId !== '' &&
-    member.socketId !== socketId &&
-    socketToRoomId.has(member.socketId)
-  ) {
-    return { ok: false, code: 'session_active', message: 'Tu es déjà connecté ailleurs.' };
+  let replacedSocketId: string | undefined;
+  if (member.socketId !== '' && member.socketId !== socketId && socketToRoomId.has(member.socketId)) {
+    replacedSocketId = member.socketId;
+    socketToRoomId.delete(replacedSocketId);
+    if (room.readySocketIds) room.readySocketIds.delete(replacedSocketId);
+    if (room.nextRoundReadySocketIds) room.nextRoundReadySocketIds.delete(replacedSocketId);
+    if (room.gamePlayers) {
+      const oldPlayer = room.gamePlayers.find((p) => p.socketId === replacedSocketId);
+      if (oldPlayer) oldPlayer.socketId = '';
+    }
   }
 
   member.socketId = socketId;
@@ -203,9 +219,6 @@ function attachSocketToMember(
     if (!player) {
       return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
     }
-    if (player.eliminated) {
-      return { ok: false, code: 'eliminated', message: 'Tu as été éliminé de cette partie.' };
-    }
     player.socketId = socketId;
     if (member.sessionId) player.sessionId = member.sessionId;
     if (avatarUrl !== undefined) player.avatarUrl = avatarUrl;
@@ -218,6 +231,7 @@ function attachSocketToMember(
       kind: 'playing',
       roomState: toGameState(room),
       privateView,
+      ...(replacedSocketId && { replacedSocketId }),
     };
   }
 
@@ -230,6 +244,7 @@ function attachSocketToMember(
     kind: 'lobby',
     roomState: toLobbyState(room),
     youAreHost: member.isHost,
+    ...(replacedSocketId && { replacedSocketId }),
   };
 }
 
@@ -647,6 +662,11 @@ export function getRoomHostName(roomId: string): string | null {
  * leaveRoom reste réservé au départ volontaire (leave_room).
  */
 export function handleDisconnect(socketId: string): HandleDisconnectResult | null {
+  if (consumeSocketBeingReplaced(socketId)) {
+    socketToRoomId.delete(socketId);
+    return null;
+  }
+
   const roomId = socketToRoomId.get(socketId);
   if (!roomId) return null;
 
@@ -1429,4 +1449,117 @@ export function startNextRound(
   socketIdsInRoom: string[]
 ): StartNextRoundResult {
   return startNextRoundInternal(roomId, socketIdsInRoom);
+}
+
+/** Snapshot sérialisable pour la base (sans sockets actifs). */
+interface PersistedRoom {
+  id: string;
+  hostSocketId: string;
+  config: GameConfig;
+  status: 'lobby' | 'playing';
+  members: RoomMember[];
+  stats: [string, PlayerStats][];
+  phase?: GamePhase;
+  gamePlayers?: GamePlayerInternal[];
+  wordPair?: WordPair;
+  roleRevealAcked?: string[];
+  eliminatedPlayerId?: string | null;
+  winner?: Winner | null;
+  votes?: [string, string][];
+  voteStartedAt?: number;
+  discussionOrder?: string[];
+  currentSpeakerIndex?: number;
+  turnStartedAt?: number;
+  turnDurationMs?: number;
+  discussionStartedAt?: number;
+  countdownEndsAt?: number | null;
+  readySocketIds?: string[];
+  nextRoundCountdownEndsAt?: number | null;
+  nextRoundReadySocketIds?: string[];
+}
+
+function roomToPersisted(room: Room): PersistedRoom {
+  return {
+    id: room.id,
+    hostSocketId: room.hostSocketId,
+    config: room.config,
+    status: room.status,
+    members: room.members.map((m) => ({ ...m })),
+    stats: [...(room.stats ?? new Map()).entries()],
+    phase: room.phase,
+    gamePlayers: room.gamePlayers?.map((p) => ({ ...p })),
+    wordPair: room.wordPair,
+    roleRevealAcked: room.roleRevealAcked ? [...room.roleRevealAcked] : undefined,
+    eliminatedPlayerId: room.eliminatedPlayerId,
+    winner: room.winner,
+    votes: room.votes ? [...room.votes.entries()] : undefined,
+    voteStartedAt: room.voteStartedAt,
+    discussionOrder: room.discussionOrder,
+    currentSpeakerIndex: room.currentSpeakerIndex,
+    turnStartedAt: room.turnStartedAt,
+    turnDurationMs: room.turnDurationMs,
+    discussionStartedAt: room.discussionStartedAt,
+    countdownEndsAt: room.countdownEndsAt ?? null,
+    readySocketIds: room.readySocketIds ? [...room.readySocketIds] : undefined,
+    nextRoundCountdownEndsAt: room.nextRoundCountdownEndsAt ?? null,
+    nextRoundReadySocketIds: room.nextRoundReadySocketIds
+      ? [...room.nextRoundReadySocketIds]
+      : undefined,
+  };
+}
+
+function clearSocketBindings(room: Room): void {
+  room.hostSocketId = '';
+  for (const m of room.members) m.socketId = '';
+  if (room.gamePlayers) {
+    for (const p of room.gamePlayers) p.socketId = '';
+  }
+  room.readySocketIds = new Set();
+  room.nextRoundReadySocketIds = new Set();
+  room.roleRevealAcked = new Set();
+}
+
+function persistedToRoom(data: PersistedRoom): Room {
+  const room: Room = {
+    id: data.id,
+    hostSocketId: data.hostSocketId,
+    config: data.config,
+    status: data.status,
+    members: data.members,
+    stats: new Map(data.stats),
+    phase: data.phase,
+    gamePlayers: data.gamePlayers,
+    wordPair: data.wordPair,
+    roleRevealAcked: data.roleRevealAcked ? new Set(data.roleRevealAcked) : undefined,
+    eliminatedPlayerId: data.eliminatedPlayerId,
+    winner: data.winner ?? null,
+    votes: data.votes ? new Map(data.votes) : undefined,
+    voteStartedAt: data.voteStartedAt,
+    discussionOrder: data.discussionOrder,
+    currentSpeakerIndex: data.currentSpeakerIndex,
+    turnStartedAt: data.turnStartedAt,
+    turnDurationMs: data.turnDurationMs,
+    discussionStartedAt: data.discussionStartedAt,
+    countdownEndsAt: data.countdownEndsAt ?? null,
+    readySocketIds: data.readySocketIds ? new Set(data.readySocketIds) : undefined,
+    nextRoundCountdownEndsAt: data.nextRoundCountdownEndsAt ?? null,
+    nextRoundReadySocketIds: data.nextRoundReadySocketIds
+      ? new Set(data.nextRoundReadySocketIds)
+      : undefined,
+  };
+  clearSocketBindings(room);
+  return room;
+}
+
+export function exportPersistedRoom(roomId: string): PersistedRoom | null {
+  const room = rooms.get(roomId);
+  if (!room) return null;
+  return roomToPersisted(room);
+}
+
+export function importPersistedRoom(roomId: string, data: unknown): void {
+  if (!data || typeof data !== 'object') return;
+  const parsed = data as PersistedRoom;
+  if (parsed.id !== roomId || !parsed.config || !Array.isArray(parsed.members)) return;
+  rooms.set(roomId, persistedToRoom(parsed));
 }

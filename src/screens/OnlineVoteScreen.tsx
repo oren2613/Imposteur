@@ -35,6 +35,7 @@ export function OnlineVoteScreen() {
   const voteProgress = gameState?.voteProgress;
   const votable = players.filter((p) => !p.eliminated && p.id !== myPlayerId);
   const myPlayer = players.find((p) => p.id === myPlayerId);
+  const amEliminated = myPlayer?.eliminated === true;
   const iAmDisconnected = myPlayer != null && !myPlayer.connected;
 
   const hasVotedOnServer =
@@ -94,6 +95,17 @@ export function OnlineVoteScreen() {
             <button type="button" onClick={clearError} className="shrink-0 underline hover:no-underline">
               Fermer
             </button>
+          </div>
+        )}
+
+        {amEliminated && (
+          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 text-center">
+            <p className="font-medium text-slate-800 dark:text-slate-100">
+              Tu as été éliminé
+            </p>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+              Observe le vote en cours. Tu ne peux plus voter.
+            </p>
           </div>
         )}
 
@@ -186,7 +198,7 @@ export function OnlineVoteScreen() {
           </ul>
         </div>
 
-        {!hasVoted && !iAmDisconnected && (
+        {!amEliminated && !hasVoted && (
           <>
             <p className="text-slate-600 dark:text-slate-400 text-center text-sm font-medium">
               Sélectionne ta cible puis confirme

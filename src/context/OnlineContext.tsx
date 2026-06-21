@@ -351,6 +351,14 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setMyPlayerId(payload.playerId);
     });
 
+    socket.on('session_replaced', (payload: { message: string }) => {
+      clearStoredSession();
+      inPlayingGameRef.current = false;
+      disconnect();
+      setPhase('home');
+      setErrorWithAutoDismiss(payload.message);
+    });
+
     socket.on('room_closed', (payload: { code: string; message: string }) => {
       clearStoredSession();
       inPlayingGameRef.current = false;

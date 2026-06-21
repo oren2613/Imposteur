@@ -84,6 +84,15 @@ function initSqliteSchema(database: SqliteDatabase) {
   } catch {
     // colonne déjà présente
   }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS game_rooms (
+      id TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_game_rooms_expires ON game_rooms(expires_at);
+  `);
 }
 
 async function initPostgresSchema(pool: pg.Pool) {
@@ -115,6 +124,15 @@ async function initPostgresSchema(pool: pg.Pool) {
     CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user_id);
   `);
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT');
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS game_rooms (
+      id TEXT PRIMARY KEY,
+      state JSONB NOT NULL,
+      updated_at BIGINT NOT NULL,
+      expires_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_game_rooms_expires ON game_rooms(expires_at);
+  `);
 }
 
 export async function initDb(): Promise<void> {
@@ -502,4 +520,57 @@ export async function refuseFriendRequest(requestId: number, toUserId: number): 
 
   const result = getSqliteDb().prepare('DELETE FROM friend_requests WHERE id = ? AND to_user_id = ?').run(requestId, toUserId);
   return result.changes > 0;
+}
+
+export interface GameRoomRow {
+  id: string;
+  state: string;
+  updated_at: number;
+  expires_at: number;
+}
+
+export async function saveGameRoom(id: string, stateJson: string, expiresAt: number): Promise<void> {
+  const now = Date.now();
+  if (usePostgres) {
+    await getPgPool().query(
+      `INSERT INTO game_rooms (id, state, updated_at, expires_at)
+       VALUES ($1, $2::jsonb, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at, expires_at = EXCLUDED.expires_at`,
+      [id, stateJson, now, expiresAt]
+    );
+    return;
+  }
+  getSqliteDb()
+    .prepare(
+      `INSERT INTO game_rooms (id, state, updated_at, expires_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at, expires_at = excluded.expires_at`
+    )
+    .run(id, stateJson, now, expiresAt);
+}
+
+export async function deleteGameRoom(id: string): Promise<void> {
+  if (usePostgres) {
+    await getPgPool().query('DELETE FROM game_rooms WHERE id = $1', [id]);
+    return;
+  }
+  getSqliteDb().prepare('DELETE FROM game_rooms WHERE id = ?').run(id);
+}
+
+export async function loadActiveGameRooms(): Promise<GameRoomRow[]> {
+  const now = Date.now();
+  if (usePostgres) {
+    const result = await getPgPool().query(
+      'SELECT id, state::text AS state, updated_at, expires_at FROM game_rooms WHERE expires_at > $1',
+      [now]
+    );
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      state: String(row.state),
+      updated_at: Number(row.updated_at),
+      expires_at: Number(row.expires_at),
+    }));
+  }
+  return getSqliteDb()
+    .prepare('SELECT id, state, updated_at, expires_at FROM game_rooms WHERE expires_at > ?')
+    .all(now) as GameRoomRow[];
 }

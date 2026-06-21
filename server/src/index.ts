@@ -38,7 +38,13 @@ import {
   forceVoteIfTimeout,
   getRoomHostName,
   relayVoiceSignal,
+  markSocketBeingReplaced,
 } from './roomStore.js';
+import {
+  scheduleRoomPersist,
+  removePersistedRoom,
+  loadPersistedRoomsIntoMemory,
+} from './roomPersistence.js';
 import {
   addToMatchmakingQueue,
   removeFromMatchmakingQueue,
@@ -396,6 +402,7 @@ function broadcastGameStart(roomId: string, roomState: import('./types.js').Room
     }
   }
   io.to(roomId).emit('game_state', { roomState });
+  scheduleRoomPersist(roomId);
   const existing = roleRevealTimers.get(roomId);
   if (existing) clearTimeout(existing);
   roleRevealTimers.set(
@@ -428,15 +435,36 @@ function triggerAutoNextRound(roomId: string): void {
 
 function broadcastGameState(roomId: string, roomState: import('./types.js').RoomGameState): void {
   io.to(roomId).emit('game_state', { roomState });
+  scheduleRoomPersist(roomId);
   if (roomState.phase === 'end' && roomState.nextRoundCountdownEndsAt) {
     scheduleEndIntermission(roomId, roomState.nextRoundCountdownEndsAt);
   }
+}
+
+function kickReplacedSocket(replacedSocketId: string, roomId: string): void {
+  markSocketBeingReplaced(replacedSocketId);
+  const old = io.sockets.sockets.get(replacedSocketId);
+  if (!old) return;
+  old.emit('session_replaced', { message: 'Connecté depuis un autre onglet.' });
+  old.leave(roomId);
+  old.disconnect(true);
+}
+
+function applySessionTakeover(
+  result: { ok: true; replacedSocketId?: string },
+  roomId: string
+): void {
+  if (result.replacedSocketId) {
+    kickReplacedSocket(result.replacedSocketId, roomId);
+  }
+  scheduleRoomPersist(roomId);
 }
 
 function handleLobbyCountdownAfterChange(roomId: string): void {
   const { change, roomState } = syncLobbyCountdown(roomId);
   if (change !== 'unchanged' && roomState) {
     io.to(roomId).emit('room_state', { roomState });
+    scheduleRoomPersist(roomId);
   }
   if (roomState?.countdownEndsAt) {
     if (change === 'started' || !lobbyCountdownTimers.has(roomId)) {
@@ -693,6 +721,7 @@ io.on('connection', (socket) => {
         roomId: result.roomId,
         roomState: result.roomState,
       });
+      scheduleRoomPersist(result.roomId);
     })();
   });
 
@@ -771,6 +800,7 @@ io.on('connection', (socket) => {
       const uidJoin = socketToUserId.get(socket.id);
       if (uidJoin != null) void broadcastFriendStatus(uidJoin, true);
       socket.join(payload.roomId);
+      applySessionTakeover(result, payload.roomId);
       if (result.kind === 'playing') {
         socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
         socket.emit('game_state', { roomState: result.roomState });
@@ -811,6 +841,7 @@ io.on('connection', (socket) => {
       const uidReconnect = socketToUserId.get(socket.id);
       if (uidReconnect != null) void broadcastFriendStatus(uidReconnect, true);
       socket.join(roomId);
+      applySessionTakeover(result, roomId);
       if (result.kind === 'lobby') {
         socket.emit('room_joined', {
           roomId,
@@ -1038,7 +1069,9 @@ io.on('connection', (socket) => {
     if (result.action === 'game_state') {
       broadcastGameState(result.roomId, result.roomState);
     }
-    // action === 'empty' : rien à broadcaster, la room est supprimée
+    if (result.action === 'empty') {
+      void removePersistedRoom(result.roomId);
+    }
   });
 
   socket.on('disconnect', () => {
@@ -1074,11 +1107,13 @@ setInterval(() => {
     const completeState = advanceDiscussionToVoteIfComplete(roomId);
     if (completeState) {
       io.to(roomId).emit('game_state', { roomState: completeState });
+      scheduleRoomPersist(roomId);
       continue;
     }
     const timeoutState = forceDiscussionToVoteIfTimeout(roomId);
     if (timeoutState) {
       io.to(roomId).emit('game_state', { roomState: timeoutState });
+      scheduleRoomPersist(roomId);
       continue;
     }
     const roomSockets = io.sockets.adapter.rooms.get(roomId);
@@ -1086,6 +1121,7 @@ setInterval(() => {
     const newState = advanceDiscussionIfSpeakerDisconnected(roomId, socketIdsInRoom);
     if (newState) {
       io.to(roomId).emit('game_state', { roomState: newState });
+      scheduleRoomPersist(roomId);
     }
   }
 
@@ -1093,15 +1129,18 @@ setInterval(() => {
     const voteState = forceVoteIfTimeout(roomId);
     if (voteState) {
       io.to(roomId).emit('game_state', { roomState: voteState });
+      scheduleRoomPersist(roomId);
     }
   }
 }, DISCUSSION_TIMEOUT_CHECK_MS);
 
 async function startServer() {
   await initDb();
+  const loadedRooms = await loadPersistedRoomsIntoMemory();
   httpServer.listen(PORT, '0.0.0.0', () => {
     const client = fs.existsSync(clientDistDir) ? ' + frontend' : '';
-    console.log(`Serveur prêt sur http://0.0.0.0:${PORT} (${process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite'}${client})`);
+    const roomsNote = loadedRooms > 0 ? `, ${loadedRooms} room(s) restaurée(s)` : '';
+    console.log(`Serveur prêt sur http://0.0.0.0:${PORT} (${process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite'}${client}${roomsNote})`);
   });
 }
 

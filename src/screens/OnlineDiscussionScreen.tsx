@@ -38,12 +38,14 @@ export function OnlineDiscussionScreen() {
   const discussionStartedAt = gameState?.discussionStartedAt ?? 0;
   const discussionDurationMs = gameState?.discussionDurationMs ?? 120_000;
   const players = gameState?.players ?? [];
+  const myPlayer = myPlayerId != null ? players.find((p) => p.id === myPlayerId) : null;
+  const amEliminated = myPlayer?.eliminated === true;
 
   const currentPlayerId = order[currentIndex] ?? null;
   const currentPlayer = currentPlayerId
     ? players.find((p) => p.id === currentPlayerId)
     : null;
-  const isMyTurn = myPlayerId !== null && currentPlayerId === myPlayerId;
+  const isMyTurn = !amEliminated && myPlayerId !== null && currentPlayerId === myPlayerId;
 
   const peerPlayerIds = players
     .filter((p) => !p.eliminated && p.id !== myPlayerId)
@@ -133,7 +135,23 @@ export function OnlineDiscussionScreen() {
           </div>
         )}
 
-        {allSpoken ? (
+        {amEliminated ? (
+          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 text-center space-y-3">
+            <p className="text-lg font-medium text-slate-800 dark:text-slate-100">
+              Tu as été éliminé
+            </p>
+            <p className="text-slate-600 dark:text-slate-400 text-sm">
+              Observe la discussion en silence. Tu ne peux plus prendre la parole.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowMyWord(true)}
+              className="py-2 px-4 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
+            >
+              Voir mon mot
+            </button>
+          </div>
+        ) : allSpoken ? (
           <div className="bg-violet-100 dark:bg-violet-900/30 rounded-2xl p-6 border border-violet-200 dark:border-violet-800 text-center">
             <p className="text-lg font-medium text-slate-800 dark:text-slate-100">
               Tout le monde a parlé
@@ -288,11 +306,6 @@ export function OnlineDiscussionScreen() {
                 Micro activé — tu pourras parler quand ce sera ton tour.
               </p>
             )}
-            <ViewMyWordModal
-              isOpen={showMyWord}
-              onClose={() => setShowMyWord(false)}
-              myWord={myWord}
-            />
             {!isMyTurn && !isMicEnabled && (
               <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
                 Attends ton tour pour parler
@@ -300,6 +313,12 @@ export function OnlineDiscussionScreen() {
             )}
           </>
         )}
+
+        <ViewMyWordModal
+          isOpen={showMyWord}
+          onClose={() => setShowMyWord(false)}
+          myWord={myWord}
+        />
       </div>
     </Layout>
   );
