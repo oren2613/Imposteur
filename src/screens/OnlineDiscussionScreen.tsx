@@ -28,11 +28,13 @@ export function OnlineDiscussionScreen() {
     clearError,
     friendsList,
     getSocket,
+    leaveRoom,
   } = useOnline();
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [showMyWord, setShowMyWord] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [clueText, setClueText] = useState('');
+  const [confirmQuit, setConfirmQuit] = useState(false);
   const passedForTurnRef = useRef(false);
 
   const order = gameState?.discussionOrder ?? [];
@@ -149,23 +151,60 @@ export function OnlineDiscussionScreen() {
           </div>
         )}
 
-        {amEliminated ? (
-          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 text-center space-y-3">
-            <p className="text-lg font-medium text-slate-800 dark:text-slate-100">
-              Tu as été éliminé
-            </p>
-            <p className="text-slate-600 dark:text-slate-400 text-sm">
-              Observe la discussion en silence. Tu ne peux plus prendre la parole.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowMyWord(true)}
-              className="py-2 px-4 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
-            >
-              Voir mon mot
-            </button>
+        {amEliminated && (
+          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 space-y-3">
+            <div className="text-center">
+              <p className="text-base font-semibold text-slate-800 dark:text-slate-100">
+                Tu as été éliminé
+              </p>
+              <p className="text-slate-600 dark:text-slate-400 text-sm mt-0.5">
+                Tu peux suivre la partie, mais tu ne peux plus parler ni voter.
+              </p>
+            </div>
+            {confirmQuit ? (
+              <div className="space-y-2">
+                <p className="text-center text-sm text-slate-600 dark:text-slate-400">
+                  Quitter définitivement la partie ?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmQuit(false)}
+                    className="flex-1 py-2 px-3 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => leaveRoom()}
+                    className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 transition-colors"
+                  >
+                    Quitter
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMyWord(true)}
+                  className="flex-1 py-2 px-3 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
+                >
+                  Voir mon mot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmQuit(true)}
+                  className="flex-1 py-2 px-3 rounded-xl text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 border border-rose-200 dark:border-rose-800 transition-colors"
+                >
+                  Quitter la partie
+                </button>
+              </div>
+            )}
           </div>
-        ) : allSpoken ? (
+        )}
+
+        {allSpoken ? (
           <div className="bg-violet-100 dark:bg-violet-900/30 rounded-2xl p-6 border border-violet-200 dark:border-violet-800 text-center">
             <p className="text-lg font-medium text-slate-800 dark:text-slate-100">
               Tout le monde a parlé
@@ -277,7 +316,9 @@ export function OnlineDiscussionScreen() {
                 </div>
               )}
               <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600 dark:text-slate-400">Temps restant (ton tour)</span>
+                <span className="text-slate-600 dark:text-slate-400">
+                  {isMyTurn ? 'Temps restant (ton tour)' : 'Temps restant (tour en cours)'}
+                </span>
                 <span className="font-mono font-semibold text-slate-800 dark:text-slate-100">
                   {remainingMs !== null
                     ? `${Math.ceil(remainingMs / 1000)} s`
@@ -323,57 +364,61 @@ export function OnlineDiscussionScreen() {
               </div>
             )}
 
-            <div className="flex gap-3 items-center">
-              {isMyTurn && (
-                <Button
-                  fullWidth
-                  size="lg"
-                  variant="secondary"
-                  onClick={() => {
-                    clearError();
-                    discussionPass();
-                  }}
-                >
-                  Passer mon tour
-                </Button>
-              )}
-              <button
-                type="button"
-                onClick={() => setShowMyWord(true)}
-                className="shrink-0 py-2 px-3 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
-              >
-                Voir mon mot
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsMicEnabled((v) => !v)}
-                className={`
-                  shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
-                  transition-colors border
-                  ${
-                    isMicEnabled && isMyTurn && isMicLive
-                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
-                      : isMicEnabled
-                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400'
-                        : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400'
-                  }
-                `}
-                title={micStatusLabel}
-                aria-label={isMicEnabled ? 'Couper le micro' : 'Activer le micro'}
-                aria-pressed={isMicEnabled}
-              >
-                {isMicEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-              </button>
-            </div>
-            {isMicEnabled && !isMyTurn && (
-              <p className="text-center text-amber-600 dark:text-amber-400 text-xs">
-                Micro activé — tu pourras parler quand ce sera ton tour.
-              </p>
-            )}
-            {!isMyTurn && !isMicEnabled && (
-              <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
-                Attends ton tour pour parler
-              </p>
+            {!amEliminated && (
+              <>
+                <div className="flex gap-3 items-center">
+                  {isMyTurn && (
+                    <Button
+                      fullWidth
+                      size="lg"
+                      variant="secondary"
+                      onClick={() => {
+                        clearError();
+                        discussionPass();
+                      }}
+                    >
+                      Passer mon tour
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowMyWord(true)}
+                    className="shrink-0 py-2 px-3 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
+                  >
+                    Voir mon mot
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsMicEnabled((v) => !v)}
+                    className={`
+                      shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
+                      transition-colors border
+                      ${
+                        isMicEnabled && isMyTurn && isMicLive
+                          ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+                          : isMicEnabled
+                            ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400'
+                            : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400'
+                      }
+                    `}
+                    title={micStatusLabel}
+                    aria-label={isMicEnabled ? 'Couper le micro' : 'Activer le micro'}
+                    aria-pressed={isMicEnabled}
+                  >
+                    {isMicEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                  </button>
+                </div>
+                {isMicEnabled && !isMyTurn && (
+                  <p className="text-center text-amber-600 dark:text-amber-400 text-xs">
+                    Micro activé — tu pourras parler quand ce sera ton tour.
+                  </p>
+                )}
+                {!isMyTurn && !isMicEnabled && (
+                  <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
+                    Attends ton tour pour parler
+                  </p>
+                )}
+              </>
             )}
           </>
         )}

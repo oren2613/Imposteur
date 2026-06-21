@@ -22,10 +22,11 @@ function voteTargetLabel(
 
 /** Panneau de vote compact, conçu pour tenir sans scroll sur l'écran principal. */
 export function OnlineVotePanel() {
-  const { gameState, myPlayerId, vote, friendsList } = useOnline();
+  const { gameState, myPlayerId, vote, friendsList, leaveRoom } = useOnline();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pendingVoteTarget, setPendingVoteTarget] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const [confirmQuit, setConfirmQuit] = useState(false);
 
   const players = gameState?.players ?? [];
   const voteProgress = gameState?.voteProgress;
@@ -124,9 +125,37 @@ export function OnlineVotePanel() {
       )}
 
       {amEliminated && (
-        <p className="text-center text-sm text-slate-600 dark:text-slate-400 shrink-0">
-          Tu es éliminé — observe le vote.
-        </p>
+        <div className="shrink-0 space-y-2">
+          <p className="text-center text-sm text-slate-600 dark:text-slate-400">
+            Tu es éliminé — observe le vote.
+          </p>
+          {confirmQuit ? (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmQuit(false)}
+                className="flex-1 py-2 px-3 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => leaveRoom()}
+                className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 transition-colors"
+              >
+                Quitter
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmQuit(true)}
+              className="w-full py-2 px-3 rounded-xl text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 border border-rose-200 dark:border-rose-800 transition-colors"
+            >
+              Quitter la partie
+            </button>
+          )}
+        </div>
       )}
 
       {hasVoted && (
