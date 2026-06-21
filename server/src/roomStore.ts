@@ -71,6 +71,8 @@ interface Room {
   nextRoundCountdownEndsAt?: number | null;
   /** Fin de manche : joueurs prêts */
   nextRoundReadySocketIds?: Set<string>;
+  /** Epoch ms : aucun joueur connecté depuis ce moment (nettoyage auto) */
+  abandonedSince?: number;
 }
 
 const MIN_PLAYERS = 3;
@@ -81,6 +83,8 @@ const MIN_PLAYERS_FOR_MR_WHITE = 4;
 export const LOBBY_COUNTDOWN_MS = 10_000;
 /** Attente max pour que tous les joueurs cliquent « Rejouer » avant exclusion */
 export const REPLAY_MAX_WAIT_MS = 90_000;
+/** Délai sans connexion avant suppression automatique de la room */
+export const ABANDON_TIMEOUT_MS = 5 * 60 * 1000;
 const ROOM_ID_LENGTH = 6;
 const NAME_MIN_LENGTH = 1;
 const NAME_MAX_LENGTH = 30;
@@ -146,6 +150,37 @@ export function validatePlayerName(name: unknown): { ok: boolean; code?: string;
     return { ok: false, code: 'invalid_name', message: 'Pseudo trop long' };
   }
   return { ok: true };
+}
+
+function countConnectedMembers(room: Room): number {
+  return room.members.filter((m) => m.socketId !== '' && socketToRoomId.has(m.socketId)).length;
+}
+
+/** Marque la room comme abandonnée si personne n'est connecté, sinon efface le marqueur. */
+function syncAbandonedState(room: Room): void {
+  if (countConnectedMembers(room) === 0) {
+    if (!room.abandonedSince) room.abandonedSince = Date.now();
+  } else {
+    room.abandonedSince = undefined;
+  }
+}
+
+/**
+ * Supprime les rooms sans joueur connecté depuis ABANDON_TIMEOUT_MS.
+ * Retourne les ids supprimés.
+ */
+export function cleanupAbandonedRooms(): string[] {
+  const now = Date.now();
+  const deleted: string[] = [];
+  for (const [roomId, room] of rooms) {
+    if (!room.abandonedSince || now - room.abandonedSince < ABANDON_TIMEOUT_MS) continue;
+    for (const m of room.members) {
+      if (m.socketId) socketToRoomId.delete(m.socketId);
+    }
+    rooms.delete(roomId);
+    deleted.push(roomId);
+  }
+  return deleted;
 }
 
 function nameTakenInRoom(room: Room, playerName: string): boolean {
@@ -234,6 +269,7 @@ function attachSocketToMember(
     if (!privateView) {
       return { ok: false, code: 'internal', message: 'Erreur interne' };
     }
+    syncAbandonedState(room);
     return {
       ok: true,
       kind: 'playing',
@@ -247,6 +283,7 @@ function attachSocketToMember(
     return { ok: false, code: 'wrong_phase', message: 'Action non autorisée' };
   }
 
+  syncAbandonedState(room);
   return {
     ok: true,
     kind: 'lobby',
@@ -604,6 +641,7 @@ export function joinRoom(
   };
   room.members.push(member);
   socketToRoomId.set(socketId, roomId);
+  syncAbandonedState(room);
 
   return {
     ok: true,
@@ -647,8 +685,10 @@ export function leaveRoom(socketId: string): LeaveRoomResult {
     player.eliminated = true;
     const victory = checkVictoryAfterElimination(room.gamePlayers);
     if (victory) {
+      syncAbandonedState(room);
       return { action: 'game_state', roomId, roomState: enterEndPhase(room, victory) };
     }
+    syncAbandonedState(room);
     return { action: 'game_state', roomId, roomState: toGameState(room) };
   }
 
@@ -675,6 +715,7 @@ export function leaveRoom(socketId: string): LeaveRoomResult {
   }
 
   clearLobbyCountdownState(room);
+  syncAbandonedState(room);
   return {
     action: 'updated',
     roomId,
@@ -712,17 +753,18 @@ export function listPublicRooms(): PublicRoomSummary[] {
   const summaries: PublicRoomSummary[] = [];
   for (const room of rooms.values()) {
     if (room.visibility !== 'public') continue;
+    const connectedCount = countConnectedMembers(room);
+    if (connectedCount === 0) continue;
     const host = room.members.find((m) => m.isHost) ?? room.members[0];
-    const memberCount = room.members.length;
     summaries.push({
       roomId: room.id,
       hostName: host?.name ?? '—',
       hostAvatarUrl: host?.avatarUrl ?? null,
-      memberCount,
+      memberCount: connectedCount,
       playerCount: room.config.playerCount,
       status: room.status,
       hasPassword: Boolean(room.password && room.password.length > 0),
-      joinable: room.status === 'lobby' && memberCount < room.config.playerCount,
+      joinable: room.status === 'lobby' && connectedCount < room.config.playerCount,
       config: room.config,
     });
   }
@@ -766,10 +808,12 @@ export function handleDisconnect(socketId: string): HandleDisconnectResult | nul
       room.votes.set(player.id, VOTE_BLANK);
       const finalized = tryFinalizeVote(room);
       if (finalized) {
+        syncAbandonedState(room);
         return { action: 'game_state', roomId, roomState: finalized.roomState };
       }
     }
 
+    syncAbandonedState(room);
     return { action: 'disconnected', roomId, roomState: toGameState(room) };
   }
 
@@ -782,6 +826,7 @@ export function handleDisconnect(socketId: string): HandleDisconnectResult | nul
   if (room.readySocketIds) room.readySocketIds.delete(socketId);
   socketToRoomId.delete(socketId);
   clearLobbyCountdownState(room);
+  syncAbandonedState(room);
   return {
     action: 'updated',
     roomId,
@@ -1604,6 +1649,7 @@ interface PersistedRoom {
   readySocketIds?: string[];
   nextRoundCountdownEndsAt?: number | null;
   nextRoundReadySocketIds?: string[];
+  abandonedSince?: number;
 }
 
 function roomToPersisted(room: Room): PersistedRoom {
@@ -1635,6 +1681,7 @@ function roomToPersisted(room: Room): PersistedRoom {
     nextRoundReadySocketIds: room.nextRoundReadySocketIds
       ? [...room.nextRoundReadySocketIds]
       : undefined,
+    abandonedSince: room.abandonedSince,
   };
 }
 
@@ -1678,8 +1725,10 @@ function persistedToRoom(data: PersistedRoom): Room {
     nextRoundReadySocketIds: data.nextRoundReadySocketIds
       ? new Set(data.nextRoundReadySocketIds)
       : undefined,
+    abandonedSince: data.abandonedSince,
   };
   clearSocketBindings(room);
+  syncAbandonedState(room);
   return room;
 }
 

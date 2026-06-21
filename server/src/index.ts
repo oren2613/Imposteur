@@ -41,6 +41,7 @@ import {
   markSocketBeingReplaced,
   resolveReplayTimeout,
   listPublicRooms,
+  cleanupAbandonedRooms,
 } from './roomStore.js';
 import {
   scheduleRoomPersist,
@@ -1183,6 +1184,25 @@ setInterval(() => {
     }
   }
 }, DISCUSSION_TIMEOUT_CHECK_MS);
+
+function purgeRoomTimers(roomId: string): void {
+  clearLobbyCountdownTimer(roomId);
+  clearEndIntermissionTimer(roomId);
+  const roleTimer = roleRevealTimers.get(roomId);
+  if (roleTimer) {
+    clearTimeout(roleTimer);
+    roleRevealTimers.delete(roomId);
+  }
+}
+
+const ABANDON_CLEANUP_CHECK_MS = 60_000;
+setInterval(() => {
+  const deleted = cleanupAbandonedRooms();
+  for (const roomId of deleted) {
+    purgeRoomTimers(roomId);
+    void removePersistedRoom(roomId);
+  }
+}, ABANDON_CLEANUP_CHECK_MS);
 
 async function startServer() {
   await initDb();
