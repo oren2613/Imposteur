@@ -141,6 +141,71 @@ function nameTakenInRoom(room: Room, playerName: string): boolean {
   return room.members.some((m) => m.name.trim().toLowerCase() === lower);
 }
 
+function findDisconnectedMemberByName(room: Room, playerName: string): RoomMember | undefined {
+  const lower = playerName.trim().toLowerCase();
+  return room.members.find(
+    (m) => m.socketId === '' && m.name.trim().toLowerCase() === lower
+  );
+}
+
+type AttachSocketResult =
+  | { ok: true; kind: 'lobby'; roomState: RoomLobbyState; youAreHost: boolean }
+  | { ok: true; kind: 'playing'; roomState: RoomGameState; privateView: PlayerPrivateView & { playerId: string } }
+  | { ok: false; code: string; message: string };
+
+/** Réassocie un socket à un membre existant (reconnexion ou reprise de place). */
+function attachSocketToMember(
+  room: Room,
+  roomId: string,
+  member: RoomMember,
+  socketId: string,
+  avatarUrl?: string | null,
+  clientSessionId?: string
+): AttachSocketResult {
+  if (member.socketId !== '' && member.socketId !== socketId) {
+    return { ok: false, code: 'session_active', message: 'Tu es déjà connecté ailleurs.' };
+  }
+
+  member.socketId = socketId;
+  if (clientSessionId) member.sessionId = clientSessionId;
+  if (avatarUrl !== undefined) member.avatarUrl = avatarUrl;
+  if (member.isHost) room.hostSocketId = socketId;
+  socketToRoomId.set(socketId, roomId);
+
+  if (room.status === 'playing' && room.gamePlayers) {
+    const player = room.gamePlayers.find(
+      (p) =>
+        (member.sessionId && p.sessionId === member.sessionId) ||
+        p.name.trim().toLowerCase() === member.name.trim().toLowerCase()
+    );
+    if (!player) {
+      return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
+    }
+    if (player.eliminated) {
+      return { ok: false, code: 'eliminated', message: 'Tu as été éliminé de cette partie.' };
+    }
+    player.socketId = socketId;
+    if (avatarUrl !== undefined) player.avatarUrl = avatarUrl;
+    const privateView = getPrivateView(roomId, socketId);
+    if (!privateView) {
+      return { ok: false, code: 'internal', message: 'Erreur interne' };
+    }
+    return {
+      ok: true,
+      kind: 'playing',
+      roomState: toGameState(room),
+      privateView,
+    };
+  }
+
+  return {
+    ok: true,
+    kind: 'lobby',
+    roomState: toLobbyState(room),
+    youAreHost: member.isHost,
+  };
+}
+
 function toLobbyState(room: Room): RoomLobbyState {
   const statsMap = room.stats ?? new Map<string, PlayerStats>();
   const readySet = room.readySocketIds ?? new Set<string>();
@@ -398,9 +463,7 @@ export function createRoom(
   };
 }
 
-export type JoinRoomResult =
-  | { ok: true; roomState: RoomLobbyState; youAreHost: boolean }
-  | { ok: false; code: string; message: string };
+export type JoinRoomResult = AttachSocketResult;
 
 export function joinRoom(
   roomId: string,
@@ -417,6 +480,20 @@ export function joinRoom(
     return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
   }
 
+  const trimmedName = playerName.trim();
+
+  if (clientSessionId) {
+    const bySession = room.members.find((m) => m.sessionId === clientSessionId);
+    if (bySession) {
+      return attachSocketToMember(room, roomId, bySession, socketId, avatarUrl, clientSessionId);
+    }
+  }
+
+  const byName = findDisconnectedMemberByName(room, trimmedName);
+  if (byName) {
+    return attachSocketToMember(room, roomId, byName, socketId, avatarUrl, clientSessionId);
+  }
+
   if (room.members.length >= room.config.playerCount) {
     return { ok: false, code: 'room_full', message: 'La room est pleine' };
   }
@@ -427,7 +504,7 @@ export function joinRoom(
 
   const member: RoomMember = {
     socketId,
-    name: playerName.trim(),
+    name: trimmedName,
     isHost: false,
     avatarUrl: avatarUrl ?? null,
     ...(clientSessionId && { sessionId: clientSessionId }),
@@ -435,11 +512,11 @@ export function joinRoom(
   room.members.push(member);
   socketToRoomId.set(socketId, roomId);
 
-  const youAreHost = socketId === room.hostSocketId;
   return {
     ok: true,
+    kind: 'lobby',
     roomState: toLobbyState(room),
-    youAreHost,
+    youAreHost: false,
   };
 }
 
@@ -521,14 +598,14 @@ export function getRoomIdBySocket(socketId: string): string | null {
 export function getRoomHostName(roomId: string): string | null {
   const room = rooms.get(roomId);
   if (!room || room.status !== 'lobby') return null;
-  const host = room.members.find((m) => m.socketId === room.hostSocketId);
+  const host = room.members.find((m) => m.isHost);
   return host?.name ?? null;
 }
 
 /**
  * Appelé à la déconnexion socket (refresh, fermeture onglet).
- * En partie : ne pas éliminer le joueur, juste libérer le socket pour reconnexion.
- * En lobby : même comportement que leaveRoom.
+ * En partie ou en lobby : ne pas retirer le joueur, libérer le socket pour reconnexion.
+ * leaveRoom reste réservé au départ volontaire (leave_room).
  */
 export function handleDisconnect(socketId: string): HandleDisconnectResult | null {
   const roomId = socketToRoomId.get(socketId);
@@ -550,7 +627,21 @@ export function handleDisconnect(socketId: string): HandleDisconnectResult | nul
     return { action: 'disconnected', roomId, roomState: toGameState(room) };
   }
 
-  return leaveRoom(socketId);
+  const member = room.members.find((m) => m.socketId === socketId);
+  if (!member) {
+    socketToRoomId.delete(socketId);
+    return null;
+  }
+  member.socketId = '';
+  if (room.readySocketIds) room.readySocketIds.delete(socketId);
+  socketToRoomId.delete(socketId);
+  clearLobbyCountdownState(room);
+  return {
+    action: 'updated',
+    roomId,
+    wasHost: member.isHost,
+    roomState: toLobbyState(room),
+  };
 }
 
 export type ReconnectToRoomResult =
@@ -573,51 +664,17 @@ export function reconnectToRoom(
     return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
   }
 
-  if (room.status === 'lobby') {
-    const member = room.members.find((m) => m.sessionId === playerSessionId);
-    if (!member) {
-      return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
-    }
-    member.socketId = socketId;
-    if (avatarUrl !== undefined) member.avatarUrl = avatarUrl;
-    socketToRoomId.set(socketId, roomId);
-    return {
-      ok: true,
-      kind: 'lobby',
-      roomState: toLobbyState(room),
-      youAreHost: member.isHost,
-    };
+  const member = room.members.find((m) => m.sessionId === playerSessionId);
+  if (member) {
+    return attachSocketToMember(room, roomId, member, socketId, avatarUrl, playerSessionId);
   }
 
-  if (room.status === 'playing' && room.gamePlayers) {
-    const player = room.gamePlayers.find((p) => p.sessionId === playerSessionId);
-    if (!player) {
-      return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
-    }
-    if (player.eliminated) {
-      return { ok: false, code: 'eliminated', message: 'Tu as été éliminé de cette partie.' };
-    }
-    player.socketId = socketId;
-    if (avatarUrl !== undefined) player.avatarUrl = avatarUrl;
-    const member = room.members.find((m) => m.sessionId === playerSessionId);
-    if (member) {
-      member.socketId = socketId;
-      if (avatarUrl !== undefined) member.avatarUrl = avatarUrl;
-    }
-    socketToRoomId.set(socketId, roomId);
-    const privateView = getPrivateView(roomId, socketId);
-    if (!privateView) {
-      return { ok: false, code: 'internal', message: 'Erreur interne' };
-    }
-    return {
-      ok: true,
-      kind: 'playing',
-      roomState: toGameState(room),
-      privateView,
-    };
+  const byName = findDisconnectedMemberByName(room, _playerName);
+  if (byName) {
+    return attachSocketToMember(room, roomId, byName, socketId, avatarUrl, playerSessionId);
   }
 
-  return { ok: false, code: 'wrong_phase', message: 'Action non autorisée' };
+  return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
 }
 
 // --- Démarrage de partie et role_reveal_ack

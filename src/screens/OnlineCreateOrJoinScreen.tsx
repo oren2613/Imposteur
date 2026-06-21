@@ -22,6 +22,7 @@ export function OnlineCreateOrJoinScreen() {
     clearError,
     inviteLinkRoomCode,
     clearInviteLinkRoomCode,
+    storedSession,
   } = useOnline();
   const { user } = useAuth();
   const [playerName, setPlayerName] = useState('');
@@ -49,6 +50,16 @@ export function OnlineCreateOrJoinScreen() {
     if (inviteLinkRoomCode) setRoomCode(inviteLinkRoomCode);
   }, [inviteLinkRoomCode]);
 
+  useEffect(() => {
+    if (storedSession?.playerName && !playerName) setPlayerName(storedSession.playerName);
+  }, [storedSession?.playerName, playerName]);
+
+  useEffect(() => {
+    if (storedSession?.roomId && !roomCode && !inviteLinkRoomCode) {
+      setRoomCode(storedSession.roomId);
+    }
+  }, [storedSession?.roomId, roomCode, inviteLinkRoomCode]);
+
   const handleBack = () => {
     if (isMatchmaking) leaveMatchmaking();
     clearError();
@@ -72,6 +83,13 @@ export function OnlineCreateOrJoinScreen() {
     joinRoom(code, name);
   };
 
+  const handleResume = () => {
+    if (!storedSession?.roomId || !storedSession.playerName || isMatchmaking) return;
+    clearError();
+    clearInviteLinkRoomCode();
+    joinRoom(storedSession.roomId, storedSession.playerName);
+  };
+
   const handleMatchmaking = () => {
     const name = playerName.trim();
     if (!name || isMatchmaking) return;
@@ -84,6 +102,18 @@ export function OnlineCreateOrJoinScreen() {
   return (
     <Layout title="Jouer en ligne" onBack={handleBack} backLabel="Accueil">
       <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+        {storedSession?.roomId && !isMatchmaking && (
+          <div className="text-sm text-emerald-800 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 p-3 rounded-xl space-y-3">
+            <p>
+              Tu peux reprendre ta partie dans la room{' '}
+              <span className="font-mono font-semibold">{storedSession.roomId}</span>.
+            </p>
+            <Button fullWidth size="sm" onClick={handleResume}>
+              Reprendre ma partie
+            </Button>
+          </div>
+        )}
+
         {inviteLinkRoomCode && !isMatchmaking && (
           <div className="text-sm text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-800 p-3 rounded-xl">
             Tu as reçu une invitation pour rejoindre la room{' '}

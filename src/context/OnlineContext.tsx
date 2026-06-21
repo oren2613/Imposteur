@@ -48,6 +48,22 @@ function getStoredSession(): StoredSession | null {
   }
 }
 
+function resolveSessionId(roomId: string, playerName: string): string {
+  const stored = getStoredSession();
+  const trimmed = playerName.trim();
+  const roomNorm = roomId.trim().toUpperCase();
+  if (
+    stored &&
+    stored.roomId === roomNorm &&
+    stored.playerName.trim().toLowerCase() === trimmed.toLowerCase()
+  ) {
+    return stored.playerSessionId;
+  }
+  return generateSessionId();
+}
+
+const RECONNECT_FATAL_ERROR_CODES = new Set(['room_not_found', 'room_closed', 'eliminated']);
+
 function saveSession(playerSessionId: string, roomId: string, playerName: string) {
   localStorage.setItem(
     SESSION_STORAGE_KEY,
@@ -99,6 +115,8 @@ interface OnlineContextValue {
   error: string | null;
   /** True pendant une tentative de reconnexion au chargement */
   isReconnecting: boolean;
+  /** Session sauvegardée (reprise après déconnexion) */
+  storedSession: StoredSession | null;
   /** Mes stats (parties jouées, victoires) — en partie uniquement */
   myStats: { gamesPlayed: number; wins: number };
   /** Créer une room avec le pseudo et une config par défaut */
@@ -175,7 +193,10 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   const [isHost, setIsHost] = useState(false);
   const [localPlayerName, setLocalPlayerName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(() => {
+    const s = getStoredSession();
+    return !!(s?.roomId && s?.playerSessionId && s?.playerName);
+  });
   const [pendingInvite, setPendingInvite] = useState<{ roomId: string; hostName: string; hostAvatarUrl?: string | null } | null>(null);
   const [pendingFriendRequest, setPendingFriendRequest] = useState<{
     requestId: number;
@@ -374,7 +395,9 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       if (reconnectingRef.current) {
         reconnectingRef.current = false;
         setIsReconnecting(false);
-        clearStoredSession();
+        if (RECONNECT_FATAL_ERROR_CODES.has(payload.code)) {
+          clearStoredSession();
+        }
         setErrorWithAutoDismiss(payload.message);
         setPhase('onlineCreateOrJoin');
       } else {
@@ -449,8 +472,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       if (reconnectingRef.current) {
         reconnectingRef.current = false;
         setIsReconnecting(false);
-        clearStoredSession();
-        setErrorWithAutoDismiss('Reconnexion impossible. Rejoins la room avec ton pseudo.');
+        setErrorWithAutoDismiss('Reconnexion lente. Réessaie ou rejoins avec ton pseudo.');
         setPhase('onlineCreateOrJoin');
       }
     }, 15_000);
@@ -482,7 +504,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       const trimmed = playerName.trim();
       setLocalPlayerName(trimmed);
       const roomIdNorm = code.trim().toUpperCase();
-      const playerSessionId = generateSessionId();
+      const playerSessionId = resolveSessionId(roomIdNorm, trimmed);
       saveSession(playerSessionId, roomIdNorm, trimmed);
       const socket = connect();
       const token = getToken();
@@ -641,6 +663,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
     };
   }, [gameState, roomState, myPlayerId]);
 
+  const storedSession = useMemo(() => getStoredSession(), [roomState, gameState, roomId, error, isReconnecting]);
+
   const value = useMemo<OnlineContextValue>(
     () => ({
       roomState,
@@ -652,6 +676,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       localPlayerName,
       error,
       isReconnecting,
+      storedSession,
       myStats,
       createRoom,
       joinRoom,
@@ -695,6 +720,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       localPlayerName,
       error,
       isReconnecting,
+      storedSession,
       myStats,
       pendingInvite,
       pendingFriendRequest,

@@ -200,7 +200,7 @@ function formMatchWithCount(count: number): MatchmakingFormedMatch | null {
       entry.sessionId,
       entry.avatarUrl
     );
-    if (!joinResult.ok) {
+    if (!joinResult.ok || joinResult.kind !== 'lobby') {
       continue;
     }
     players.push({

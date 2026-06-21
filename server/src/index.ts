@@ -768,6 +768,16 @@ io.on('connection', (socket) => {
       const uidJoin = socketToUserId.get(socket.id);
       if (uidJoin != null) void broadcastFriendStatus(uidJoin, true);
       socket.join(payload.roomId);
+      if (result.kind === 'playing') {
+        socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
+        socket.emit('game_state', { roomState: result.roomState });
+        const snapshot = getRoomMemberSnapshot(payload.roomId);
+        if (snapshot) {
+          socket.emit('room_state', { roomState: snapshot });
+        }
+        io.to(payload.roomId).emit('game_state', { roomState: result.roomState });
+        return;
+      }
       socket.emit('room_joined', {
         roomId: payload.roomId,
         roomState: result.roomState,
