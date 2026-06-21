@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Loader2 } from 'lucide-react';
+import { Search, Loader2, List, Globe, Lock } from 'lucide-react';
 import { useGame } from '../context/GameContext';
 import { useOnline } from '../context/OnlineContext';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +27,9 @@ export function OnlineCreateOrJoinScreen() {
   const { user } = useAuth();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
+  const [joinPassword, setJoinPassword] = useState('');
+  const [visibility, setVisibility] = useState<'public' | 'private'>('public');
+  const [createPassword, setCreatePassword] = useState('');
   const [timeoutSecondsLeft, setTimeoutSecondsLeft] = useState<number | null>(null);
 
   useEffect(() => {
@@ -71,7 +74,11 @@ export function OnlineCreateOrJoinScreen() {
     e.preventDefault();
     const name = playerName.trim();
     if (!name || isMatchmaking) return;
-    createRoom(name);
+    if (visibility === 'private' && !createPassword.trim()) return;
+    createRoom(name, {
+      visibility,
+      ...(visibility === 'private' && { password: createPassword.trim() }),
+    });
   };
 
   const handleJoin = (e: React.FormEvent) => {
@@ -80,7 +87,7 @@ export function OnlineCreateOrJoinScreen() {
     const code = roomCode.trim().toUpperCase();
     if (!name || !code || isMatchmaking) return;
     clearInviteLinkRoomCode();
-    joinRoom(code, name);
+    joinRoom(code, name, joinPassword.trim() || undefined);
   };
 
   const handleResume = () => {
@@ -195,19 +202,71 @@ export function OnlineCreateOrJoinScreen() {
               Rechercher une partie
             </Button>
 
+            <Button
+              fullWidth
+              size="lg"
+              variant="secondary"
+              onClick={() => {
+                clearError();
+                setPhase('onlineBrowse');
+              }}
+              className="gap-2"
+            >
+              <List className="w-5 h-5 shrink-0" />
+              Parcourir les rooms
+            </Button>
+
             <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
               ou jouer entre amis
             </p>
 
             <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVisibility('public')}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                    visibility === 'public'
+                      ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <Globe className="w-4 h-4" />
+                  Ouverte
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVisibility('private')}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                    visibility === 'private'
+                      ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <Lock className="w-4 h-4" />
+                  Privée
+                </button>
+              </div>
+
+              {visibility === 'private' && (
+                <input
+                  type="password"
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  placeholder="Mot de passe de la room"
+                  maxLength={40}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                />
+              )}
+
               <Button
                 fullWidth
                 size="lg"
                 variant="secondary"
                 onClick={handleCreate}
-                disabled={!nameReady}
+                disabled={!nameReady || (visibility === 'private' && !createPassword.trim())}
               >
-                Créer une room
+                Créer une room {visibility === 'private' ? 'privée' : 'ouverte'}
               </Button>
 
               <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
@@ -222,6 +281,14 @@ export function OnlineCreateOrJoinScreen() {
                   placeholder="Code de la room (ex. ABC123)"
                   maxLength={6}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-violet-500 focus:border-transparent uppercase"
+                />
+                <input
+                  type="password"
+                  value={joinPassword}
+                  onChange={(e) => setJoinPassword(e.target.value)}
+                  placeholder="Mot de passe (si room privée)"
+                  maxLength={40}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                 />
                 <Button
                   fullWidth

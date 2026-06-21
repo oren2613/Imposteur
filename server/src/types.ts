@@ -124,6 +124,10 @@ export interface CreateRoomPayload {
   playerName: string;
   /** Session client pour reconnexion après refresh */
   clientSessionId?: string;
+  /** Visibilité de la room : publique (listée) ou privée (sur code) */
+  visibility?: 'public' | 'private';
+  /** Mot de passe (rooms privées) */
+  password?: string;
 }
 
 export interface JoinRoomPayload {
@@ -131,6 +135,8 @@ export interface JoinRoomPayload {
   playerName: string;
   /** Session client pour reconnexion après refresh */
   clientSessionId?: string;
+  /** Mot de passe (rooms protégées) */
+  password?: string;
 }
 
 /** Payload pour reconnexion à une room (après refresh) */

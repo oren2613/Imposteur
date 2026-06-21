@@ -21,6 +21,7 @@ import type {
   RoomLobbyState,
   RoomGameState,
   OnlineGameConfig,
+  PublicRoomSummary,
   YourRolePayload as OnlineYourRolePayload,
 } from '../types/online';
 import { clearRoomInviteFromUrl, parseRoomCodeFromUrl } from '../utils/roomInviteLink';
@@ -134,9 +135,11 @@ interface OnlineContextValue {
   /** Mes stats (parties jouées, victoires) — en partie uniquement */
   myStats: { gamesPlayed: number; wins: number };
   /** Créer une room avec le pseudo et une config par défaut */
-  createRoom: (playerName: string) => void;
-  /** Rejoindre une room par code */
-  joinRoom: (roomId: string, playerName: string) => void;
+  createRoom: (playerName: string, options?: { visibility?: 'public' | 'private'; password?: string }) => void;
+  /** Rejoindre une room par code (mot de passe optionnel pour les rooms privées) */
+  joinRoom: (roomId: string, playerName: string, password?: string) => void;
+  /** Récupérer la liste des rooms publiques (navigateur de rooms) */
+  fetchPublicRooms: () => Promise<import('../types/online').PublicRoomSummary[]>;
   /** Rechercher une partie (matchmaking) */
   joinMatchmaking: (playerName: string) => void;
   /** Annuler la recherche de partie */
@@ -376,6 +379,15 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setErrorWithAutoDismiss(payload.message);
     });
 
+    socket.on('removed_from_room', (payload: { code: string; message: string }) => {
+      sessionKilledRef.current = true;
+      clearStoredSession();
+      inPlayingGameRef.current = false;
+      disconnect({ permanent: true });
+      setPhase('home');
+      setErrorWithAutoDismiss(payload.message);
+    });
+
     socket.on('room_closed', (payload: { code: string; message: string }) => {
       clearStoredSession();
       inPlayingGameRef.current = false;
@@ -531,7 +543,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   }, [connect, setPhase, setErrorWithAutoDismiss]);
 
   const createRoom = useCallback(
-    (playerName: string) => {
+    (playerName: string, options?: { visibility?: 'public' | 'private'; password?: string }) => {
       sessionKilledRef.current = false;
       setError(null);
       const trimmed = playerName.trim();
@@ -544,6 +556,8 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
         config: DEFAULT_CONFIG,
         playerName: trimmed,
         clientSessionId: playerSessionId,
+        visibility: options?.visibility ?? 'public',
+        ...(options?.password && { password: options.password }),
         ...(token && { authToken: token }),
       });
     },
@@ -551,7 +565,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
   );
 
   const joinRoom = useCallback(
-    (code: string, playerName: string) => {
+    (code: string, playerName: string, password?: string) => {
       sessionKilledRef.current = false;
       setError(null);
       const trimmed = playerName.trim();
@@ -565,11 +579,33 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
         roomId: roomIdNorm,
         playerName: trimmed,
         clientSessionId: playerSessionId,
+        ...(password && { password }),
         ...(token && { authToken: token }),
       });
     },
     [connect]
   );
+
+  const fetchPublicRooms = useCallback((): Promise<PublicRoomSummary[]> => {
+    return new Promise((resolve) => {
+      const socket = connect();
+      let settled = false;
+      const done = (rooms: PublicRoomSummary[]) => {
+        if (settled) return;
+        settled = true;
+        resolve(rooms);
+      };
+      const emit = () => {
+        socket.timeout(5000).emit('list_public_rooms', (err: unknown, res: { rooms?: PublicRoomSummary[] }) => {
+          if (err) return done([]);
+          done(Array.isArray(res?.rooms) ? res.rooms : []);
+        });
+      };
+      if (socket.connected) emit();
+      else socket.once('connect', emit);
+      setTimeout(() => done([]), 6000);
+    });
+  }, [connect]);
 
   const joinMatchmaking = useCallback(
     (playerName: string) => {
@@ -734,6 +770,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       myStats,
       createRoom,
       joinRoom,
+      fetchPublicRooms,
       joinMatchmaking,
       leaveMatchmaking,
       isMatchmaking,
@@ -787,6 +824,7 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       matchmakingTargetSize,
       createRoom,
       joinRoom,
+      fetchPublicRooms,
       joinMatchmaking,
       leaveMatchmaking,
       clearInviteLinkRoomCode,

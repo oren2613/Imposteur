@@ -29,11 +29,17 @@ interface PlayerStats {
 }
 
 /** Room interne : lobby ou en partie */
+export type RoomVisibility = 'public' | 'private';
+
 interface Room {
   id: string;
   hostSocketId: string;
   config: GameConfig;
   status: 'lobby' | 'playing';
+  /** public = listée dans le navigateur de rooms, private = uniquement par code */
+  visibility: RoomVisibility;
+  /** Mot de passe requis pour rejoindre (rooms privées). Vide/absent = libre. */
+  password?: string;
   members: RoomMember[];
   /** Stats de victoire par sessionId (persistantes entre manches) */
   stats: Map<string, PlayerStats>;
@@ -73,6 +79,8 @@ const MAX_PLAYERS = 12;
 const MIN_PLAYERS_FOR_MR_WHITE = 4;
 /** Délai avant le début auto quand la room est pleine */
 export const LOBBY_COUNTDOWN_MS = 10_000;
+/** Attente max pour que tous les joueurs cliquent « Rejouer » avant exclusion */
+export const REPLAY_MAX_WAIT_MS = 90_000;
 const ROOM_ID_LENGTH = 6;
 const NAME_MIN_LENGTH = 1;
 const NAME_MAX_LENGTH = 30;
@@ -380,8 +388,9 @@ function allConnectedMembersReadyForNextRound(room: Room, socketIdsInRoom: strin
 function enterEndPhase(room: Room, winner: Winner): RoomGameState {
   room.phase = 'end';
   room.winner = winner;
-  room.nextRoundCountdownEndsAt = Date.now() + LOBBY_COUNTDOWN_MS;
+  room.nextRoundCountdownEndsAt = Date.now() + REPLAY_MAX_WAIT_MS;
   room.nextRoundReadySocketIds = new Set();
+  updateStatsFromGame(room);
   return toGameState(room);
 }
 
@@ -475,7 +484,9 @@ export function createRoom(
   playerName: string,
   socketId: string,
   clientSessionId?: string,
-  avatarUrl?: string | null
+  avatarUrl?: string | null,
+  visibility: RoomVisibility = 'public',
+  password?: string
 ): CreateRoomResult {
   if (socketToRoomId.has(socketId)) {
     return { ok: false, code: 'already_in_room', message: 'Tu es déjà dans une room' };
@@ -486,6 +497,11 @@ export function createRoom(
 
   const nameCheck = validatePlayerName(playerName);
   if (!nameCheck.ok) return { ok: false, code: nameCheck.code!, message: nameCheck.message! };
+
+  const trimmedPassword = typeof password === 'string' ? password.trim() : '';
+  if (visibility === 'private' && trimmedPassword.length === 0) {
+    return { ok: false, code: 'password_required', message: 'Une room privée nécessite un mot de passe' };
+  }
 
   const id = generateRoomId();
   const member: RoomMember = {
@@ -500,6 +516,8 @@ export function createRoom(
     hostSocketId: socketId,
     config,
     status: 'lobby',
+    visibility,
+    ...(trimmedPassword.length > 0 && { password: trimmedPassword }),
     members: [member],
     stats: new Map(),
   };
@@ -520,7 +538,8 @@ export function joinRoom(
   playerName: string,
   socketId: string,
   clientSessionId?: string,
-  avatarUrl?: string | null
+  avatarUrl?: string | null,
+  password?: string
 ): JoinRoomResult {
   const nameCheck = validatePlayerName(playerName);
   if (!nameCheck.ok) return { ok: false, code: nameCheck.code!, message: nameCheck.message! };
@@ -547,6 +566,17 @@ export function joinRoom(
   const byName = findReconnectableMemberByName(room, trimmedName);
   if (byName) {
     return attachSocketToMember(room, roomId, byName, socketId, avatarUrl, clientSessionId);
+  }
+
+  // Nouvel arrivant : vérifier le mot de passe d'une room protégée.
+  if (room.password && room.password.length > 0) {
+    const provided = typeof password === 'string' ? password.trim() : '';
+    if (provided.length === 0) {
+      return { ok: false, code: 'password_required', message: 'Cette room est privée. Entre le mot de passe.' };
+    }
+    if (provided !== room.password) {
+      return { ok: false, code: 'wrong_password', message: 'Mot de passe incorrect' };
+    }
   }
 
   if (room.status === 'playing') {
@@ -663,6 +693,45 @@ export function getRoomHostName(roomId: string): string | null {
   if (!room || room.status !== 'lobby') return null;
   const host = room.members.find((m) => m.isHost);
   return host?.name ?? null;
+}
+
+export interface PublicRoomSummary {
+  roomId: string;
+  hostName: string;
+  hostAvatarUrl: string | null;
+  memberCount: number;
+  playerCount: number;
+  status: 'lobby' | 'playing';
+  hasPassword: boolean;
+  joinable: boolean;
+  config: GameConfig;
+}
+
+/** Liste des rooms publiques (pour le navigateur de rooms). */
+export function listPublicRooms(): PublicRoomSummary[] {
+  const summaries: PublicRoomSummary[] = [];
+  for (const room of rooms.values()) {
+    if (room.visibility !== 'public') continue;
+    const host = room.members.find((m) => m.isHost) ?? room.members[0];
+    const memberCount = room.members.length;
+    summaries.push({
+      roomId: room.id,
+      hostName: host?.name ?? '—',
+      hostAvatarUrl: host?.avatarUrl ?? null,
+      memberCount,
+      playerCount: room.config.playerCount,
+      status: room.status,
+      hasPassword: Boolean(room.password && room.password.length > 0),
+      joinable: room.status === 'lobby' && memberCount < room.config.playerCount,
+      config: room.config,
+    });
+  }
+  // Joignables d'abord, puis les plus remplies.
+  summaries.sort((a, b) => {
+    if (a.joinable !== b.joinable) return a.joinable ? -1 : 1;
+    return b.memberCount - a.memberCount;
+  });
+  return summaries;
 }
 
 /**
@@ -1440,7 +1509,7 @@ export function startNextRoundInternal(
     mrWhiteEnabled,
   };
 
-  updateStatsFromGame(room);
+  // Les stats ont déjà été comptabilisées à l'entrée en phase 'end'.
   clearGameState(room);
   room.status = 'lobby';
   const { wordPair, players: gamePlayers } = startGameLogic(room.members, room.config);
@@ -1460,12 +1529,62 @@ export function startNextRound(
   return startNextRoundInternal(roomId, socketIdsInRoom);
 }
 
+export type ReplayTimeoutResult =
+  | { action: 'started'; roomState: RoomGameState; kickedSocketIds: string[] }
+  | { action: 'not_enough'; roomState: RoomGameState; kickedSocketIds: string[] }
+  | null;
+
+/**
+ * À l'expiration du délai de « Rejouer » (90 s) : exclut les joueurs qui n'ont
+ * pas validé, puis relance une manche si au moins MIN_PLAYERS ont validé.
+ */
+export function resolveReplayTimeout(roomId: string): ReplayTimeoutResult {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'end') return null;
+
+  const readySet = room.nextRoundReadySocketIds ?? new Set<string>();
+  const kept: RoomMember[] = [];
+  const kickedSocketIds: string[] = [];
+  for (const m of room.members) {
+    const isReady = m.socketId !== '' && readySet.has(m.socketId);
+    if (isReady) {
+      kept.push(m);
+    } else if (m.socketId !== '') {
+      kickedSocketIds.push(m.socketId);
+    }
+  }
+
+  for (const sid of kickedSocketIds) {
+    socketToRoomId.delete(sid);
+    room.nextRoundReadySocketIds?.delete(sid);
+  }
+  room.members = kept;
+
+  if (kept.length >= MIN_PLAYERS) {
+    const result = startNextRoundInternal(roomId, kept.map((m) => m.socketId));
+    if (result.ok) {
+      return { action: 'started', roomState: result.roomState, kickedSocketIds };
+    }
+  }
+
+  if (kept.length > 0 && !kept.some((m) => m.isHost)) {
+    kept.forEach((m, i) => {
+      m.isHost = i === 0;
+    });
+    room.hostSocketId = kept[0].socketId;
+  }
+  clearEndIntermissionState(room);
+  return { action: 'not_enough', roomState: toGameState(room), kickedSocketIds };
+}
+
 /** Snapshot sérialisable pour la base (sans sockets actifs). */
 interface PersistedRoom {
   id: string;
   hostSocketId: string;
   config: GameConfig;
   status: 'lobby' | 'playing';
+  visibility?: RoomVisibility;
+  password?: string;
   members: RoomMember[];
   stats: [string, PlayerStats][];
   phase?: GamePhase;
@@ -1493,6 +1612,8 @@ function roomToPersisted(room: Room): PersistedRoom {
     hostSocketId: room.hostSocketId,
     config: room.config,
     status: room.status,
+    visibility: room.visibility,
+    ...(room.password && { password: room.password }),
     members: room.members.map((m) => ({ ...m })),
     stats: [...(room.stats ?? new Map()).entries()],
     phase: room.phase,
@@ -1534,6 +1655,8 @@ function persistedToRoom(data: PersistedRoom): Room {
     hostSocketId: data.hostSocketId,
     config: data.config,
     status: data.status,
+    visibility: data.visibility ?? 'public',
+    ...(data.password && { password: data.password }),
     members: data.members,
     stats: new Map(data.stats),
     phase: data.phase,

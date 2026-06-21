@@ -89,3 +89,16 @@ export interface YourRolePayload {
   word: string | null;
   playerId: string;
 }
+
+/** Résumé d'une room publique (navigateur de rooms) */
+export interface PublicRoomSummary {
+  roomId: string;
+  hostName: string;
+  hostAvatarUrl: string | null;
+  memberCount: number;
+  playerCount: number;
+  status: 'lobby' | 'playing';
+  hasPassword: boolean;
+  joinable: boolean;
+  config: OnlineGameConfig;
+}

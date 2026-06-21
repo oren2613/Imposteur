@@ -28,6 +28,11 @@ interface LobbyReadyPanelProps {
   isReady: boolean;
   onToggleReady: (ready: boolean) => void;
   waitingLabel?: string;
+  countdownTitle?: string;
+  allReadyTitle?: string;
+  note?: string;
+  readyLabel?: string;
+  notReadyLabel?: string;
 }
 
 export function LobbyReadyPanel({
@@ -37,10 +42,22 @@ export function LobbyReadyPanel({
   isReady,
   onToggleReady,
   waitingLabel = 'En attente de joueurs…',
+  countdownTitle = 'Début automatique dans',
+  allReadyTitle = 'Tous prêts — lancement imminent !',
+  note = 'tout le monde prêt pour lancer plus vite',
+  readyLabel = 'Je suis prêt',
+  notReadyLabel = 'Prêt — cliquer pour annuler',
 }: LobbyReadyPanelProps) {
   const secondsLeft = useCountdownSeconds(countdownEndsAt);
   const allReady = readyCount === totalCount && totalCount > 0;
   const countdownActive = countdownEndsAt != null;
+
+  const formatTime = (s: number) => {
+    if (s < 60) return `${s} s`;
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return `${m}:${rem.toString().padStart(2, '0')}`;
+  };
 
   if (!countdownActive) {
     return (
@@ -54,16 +71,16 @@ export function LobbyReadyPanel({
     <div className="space-y-3">
       <div className="bg-violet-50 dark:bg-violet-900/20 rounded-2xl p-4 border border-violet-200 dark:border-violet-800 text-center">
         <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">
-          {allReady ? 'Tous prêts — lancement imminent !' : 'Début automatique dans'}
+          {allReady ? allReadyTitle : countdownTitle}
         </p>
         {!allReady && (
           <p className="text-3xl font-bold text-violet-700 dark:text-violet-300 tabular-nums">
-            {secondsLeft ?? '…'} s
+            {secondsLeft != null ? formatTime(secondsLeft) : '…'}
           </p>
         )}
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
           {readyCount} / {totalCount} prêt{readyCount > 1 ? 's' : ''}
-          {!allReady && ' — tout le monde prêt pour lancer plus vite'}
+          {!allReady && ` — ${note}`}
         </p>
       </div>
 
@@ -76,10 +93,10 @@ export function LobbyReadyPanel({
         {isReady ? (
           <>
             <Check className="w-5 h-5" />
-            Prêt — cliquer pour annuler
+            {notReadyLabel}
           </>
         ) : (
-          'Je suis prêt'
+          readyLabel
         )}
       </Button>
     </div>

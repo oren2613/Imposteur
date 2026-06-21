@@ -3,11 +3,19 @@ import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
 import { OnlineStatsBar } from '../components/OnlineStatsBar';
 import { LobbyReadyPanel } from '../components/LobbyReadyPanel';
+import { Fireworks } from '../components/Fireworks';
+import { Trophy } from 'lucide-react';
 
 const winnerLabels: Record<string, string> = {
   citoyens: 'Les Citoyens gagnent',
   imposteur: "L'Imposteur gagne",
   mrWhite: 'Mr. White gagne seul',
+};
+
+const winnerAccent: Record<string, string> = {
+  citoyens: 'from-emerald-400 to-teal-500',
+  imposteur: 'from-rose-400 to-red-500',
+  mrWhite: 'from-amber-400 to-orange-500',
 };
 
 export function OnlineEndScreen() {
@@ -35,13 +43,25 @@ export function OnlineEndScreen() {
 
   return (
     <Layout title="Fin de partie" onBack={() => leaveRoom()} backLabel="Quitter">
-      <OnlineStatsBar />
-      <div className="space-y-6">
-        <div className="bg-violet-100 dark:bg-violet-900/30 rounded-2xl p-6 text-center border border-violet-200 dark:border-violet-800">
-          <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+      <Fireworks active={winner != null} />
+      <div className="space-y-6 relative z-10">
+        <div
+          className={`rounded-3xl p-8 text-center text-white shadow-lg bg-gradient-to-br ${
+            winner ? winnerAccent[winner] : 'from-violet-400 to-purple-500'
+          } animate-pop-in`}
+        >
+          <div className="flex justify-center mb-3">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center animate-bounce-slow">
+              <Trophy className="w-8 h-8" />
+            </div>
+          </div>
+          <p className="text-xs uppercase tracking-widest text-white/80 mb-1">Vainqueur</p>
+          <p className="text-3xl font-extrabold drop-shadow-sm">
             {winner ? winnerLabels[winner] : 'Partie terminée'}
           </p>
         </div>
+
+        <OnlineStatsBar />
 
         {wordPair && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
@@ -76,17 +96,28 @@ export function OnlineEndScreen() {
         )}
 
         {totalCount >= 3 ? (
-          <LobbyReadyPanel
-            countdownEndsAt={countdownEndsAt}
-            readyCount={readyCount}
-            totalCount={totalCount}
-            isReady={amReady}
-            onToggleReady={(ready) => {
-              clearError();
-              setLobbyReady(ready);
-            }}
-            waitingLabel="En attente des autres joueurs…"
-          />
+          <>
+            <LobbyReadyPanel
+              countdownEndsAt={countdownEndsAt}
+              readyCount={readyCount}
+              totalCount={totalCount}
+              isReady={amReady}
+              onToggleReady={(ready) => {
+                clearError();
+                setLobbyReady(ready);
+              }}
+              countdownTitle="Exclusion des absents dans"
+              allReadyTitle="Tout le monde rejoue !"
+              note="valide pour lancer plus vite"
+              readyLabel="Rejouer"
+              notReadyLabel="Prêt à rejouer — annuler"
+              waitingLabel="En attente des autres joueurs…"
+            />
+            <p className="text-center text-xs text-slate-400 dark:text-slate-500">
+              Les joueurs qui ne valident pas avant la fin du compte à rebours
+              seront retirés de la room.
+            </p>
+          </>
         ) : (
           <p className="text-center text-slate-500 dark:text-slate-400 text-sm">
             Pas assez de joueurs pour une nouvelle manche.

@@ -35,6 +35,7 @@ export type GamePhase =
   | 'mrWhiteGuess'
   | 'end'
   | 'onlineCreateOrJoin'
+  | 'onlineBrowse'
   | 'onlineLobby'
   | 'onlineRoleReveal'
   | 'onlineDiscussion'

@@ -175,7 +175,8 @@ function formMatchWithCount(count: number): MatchmakingFormedMatch | null {
     host.playerName,
     host.socketId,
     host.sessionId,
-    host.avatarUrl
+    host.avatarUrl,
+    'private'
   );
 
   if (!createResult.ok) {

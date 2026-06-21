@@ -39,6 +39,8 @@ import {
   getRoomHostName,
   relayVoiceSignal,
   markSocketBeingReplaced,
+  resolveReplayTimeout,
+  listPublicRooms,
 } from './roomStore.js';
 import {
   scheduleRoomPersist,
@@ -385,7 +387,7 @@ function scheduleEndIntermission(roomId: string, endsAt: number): void {
     roomId,
     setTimeout(() => {
       endIntermissionTimers.delete(roomId);
-      triggerAutoNextRound(roomId);
+      triggerReplayTimeout(roomId);
     }, delay)
   );
 }
@@ -436,8 +438,36 @@ function triggerAutoNextRound(roomId: string): void {
 function broadcastGameState(roomId: string, roomState: import('./types.js').RoomGameState): void {
   io.to(roomId).emit('game_state', { roomState });
   scheduleRoomPersist(roomId);
-  if (roomState.phase === 'end' && roomState.nextRoundCountdownEndsAt) {
-    scheduleEndIntermission(roomId, roomState.nextRoundCountdownEndsAt);
+  if (roomState.phase === 'end') {
+    // Pousser un room_state à jour pour rafraîchir les stats (parties/victoires).
+    const snapshot = getRoomMemberSnapshot(roomId);
+    if (snapshot) io.to(roomId).emit('room_state', { roomState: snapshot });
+    if (roomState.nextRoundCountdownEndsAt) {
+      scheduleEndIntermission(roomId, roomState.nextRoundCountdownEndsAt);
+    }
+  }
+}
+
+function kickFromRoom(socketId: string, roomId: string, message: string): void {
+  markSocketBeingReplaced(socketId);
+  const s = io.sockets.sockets.get(socketId);
+  if (!s) return;
+  s.emit('removed_from_room', { code: 'replay_timeout', message });
+  s.leave(roomId);
+  s.disconnect(true);
+}
+
+function triggerReplayTimeout(roomId: string): void {
+  const result = resolveReplayTimeout(roomId);
+  if (!result) return;
+  clearEndIntermissionTimer(roomId);
+  for (const sid of result.kickedSocketIds) {
+    kickFromRoom(sid, roomId, 'Tu as été retiré de la room (pas de validation pour rejouer).');
+  }
+  if (result.action === 'started') {
+    broadcastGameStart(roomId, result.roomState);
+  } else {
+    broadcastGameState(roomId, result.roomState);
   }
 }
 
@@ -700,6 +730,11 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('list_public_rooms', (ack: unknown) => {
+    if (typeof ack !== 'function') return;
+    (ack as (res: { rooms: ReturnType<typeof listPublicRooms> }) => void)({ rooms: listPublicRooms() });
+  });
+
   socket.on('create_room', (payload: unknown) => {
     if (!isCreateRoomPayload(payload)) {
       emitError(socket, 'invalid_payload', 'Payload create_room invalide');
@@ -716,7 +751,11 @@ io.on('connection', (socket) => {
         ? (payload as { authToken: string }).authToken
         : undefined;
       const avatarUrl = await getAvatarUrlFromAuthToken(authToken);
-      const result = createRoom(payload.config, payload.playerName, socket.id, payload.clientSessionId, avatarUrl);
+      const rawVisibility = (payload as { visibility?: unknown }).visibility;
+      const visibility: 'public' | 'private' = rawVisibility === 'private' ? 'private' : 'public';
+      const rawPassword = (payload as { password?: unknown }).password;
+      const password = typeof rawPassword === 'string' ? rawPassword : undefined;
+      const result = createRoom(payload.config, payload.playerName, socket.id, payload.clientSessionId, avatarUrl, visibility, password);
       if (!result.ok) {
         emitError(socket, result.code, result.message);
         return;
@@ -799,7 +838,9 @@ io.on('connection', (socket) => {
         ? (payload as { authToken: string }).authToken
         : undefined;
       const avatarUrl = await getAvatarUrlFromAuthToken(authToken);
-      const result = joinRoom(payload.roomId, payload.playerName, socket.id, payload.clientSessionId, avatarUrl);
+      const rawPassword = (payload as { password?: unknown }).password;
+      const password = typeof rawPassword === 'string' ? rawPassword : undefined;
+      const result = joinRoom(payload.roomId, payload.playerName, socket.id, payload.clientSessionId, avatarUrl, password);
       if (!result.ok) {
         emitError(socket, result.code, result.message);
         return;

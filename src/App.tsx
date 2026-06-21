@@ -19,6 +19,7 @@ import { EndGameScreen } from './screens/EndGameScreen';
 import { RulesScreen } from './screens/RulesScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
 import { OnlineCreateOrJoinScreen } from './screens/OnlineCreateOrJoinScreen';
+import { OnlineBrowseScreen } from './screens/OnlineBrowseScreen';
 import { OnlineLobbyScreen } from './screens/OnlineLobbyScreen';
 import { OnlineRoleRevealScreen } from './screens/OnlineRoleRevealScreen';
 import { OnlineDiscussionScreen } from './screens/OnlineDiscussionScreen';
@@ -58,6 +59,7 @@ function AppContent() {
   if (phase === 'mrWhiteGuess') return <MrWhiteGuessScreen />;
   if (phase === 'end') return <EndGameScreen />;
   if (phase === 'onlineCreateOrJoin') return <OnlineCreateOrJoinScreen />;
+  if (phase === 'onlineBrowse') return <OnlineBrowseScreen />;
   if (phase === 'onlineLobby') return <OnlineLobbyScreen />;
   if (phase === 'onlineRoleReveal') return <OnlineRoleRevealScreen />;
   if (phase === 'onlineDiscussion') return <OnlineDiscussionScreen />;
