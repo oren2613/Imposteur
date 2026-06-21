@@ -181,7 +181,13 @@ function shuffle<T>(arr: T[]): T[] {
 
 function toGameState(room: Room): RoomGameState {
   const players = (room.gamePlayers ?? []).map(
-    (p): PlayerPublic => ({ id: p.id, name: p.name, eliminated: p.eliminated, avatarUrl: p.avatarUrl ?? null })
+    (p): PlayerPublic => ({
+      id: p.id,
+      name: p.name,
+      eliminated: p.eliminated,
+      connected: p.socketId !== '',
+      avatarUrl: p.avatarUrl ?? null,
+    })
   );
   const phase = room.phase ?? 'roleReveal';
   const state: RoomGameState = {
@@ -428,7 +434,7 @@ export type LeaveRoomResult =
 
 /** Résultat de handleDisconnect : soit disconnected (sans éliminer), soit LeaveRoomResult */
 export type HandleDisconnectResult =
-  | { action: 'disconnected'; roomId: string }
+  | { action: 'disconnected'; roomId: string; roomState: RoomGameState }
   | LeaveRoomResult;
 
 /**
@@ -518,9 +524,12 @@ export function handleDisconnect(socketId: string): HandleDisconnectResult | nul
 
   if (room.status === 'playing' && room.gamePlayers) {
     const player = room.gamePlayers.find((p) => p.socketId === socketId);
-    if (player) player.socketId = '';
     socketToRoomId.delete(socketId);
-    return { action: 'disconnected', roomId };
+    if (!player) return null;
+    player.socketId = '';
+    const member = room.members.find((m) => m.sessionId === player.sessionId);
+    if (member) member.socketId = '';
+    return { action: 'disconnected', roomId, roomState: toGameState(room) };
   }
 
   return leaveRoom(socketId);
@@ -572,6 +581,11 @@ export function reconnectToRoom(
     }
     player.socketId = socketId;
     if (avatarUrl !== undefined) player.avatarUrl = avatarUrl;
+    const member = room.members.find((m) => m.sessionId === playerSessionId);
+    if (member) {
+      member.socketId = socketId;
+      if (avatarUrl !== undefined) member.avatarUrl = avatarUrl;
+    }
     socketToRoomId.set(socketId, roomId);
     const privateView = getPrivateView(roomId, socketId);
     if (!privateView) {

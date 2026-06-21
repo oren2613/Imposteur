@@ -1,3 +1,4 @@
+import { WifiOff } from 'lucide-react';
 import { getAvatarColor, getAvatarInitials } from '../utils/avatar';
 
 const sizeClasses = {
@@ -12,29 +13,45 @@ interface UserAvatarProps {
   avatarUrl?: string | null;
   size?: keyof typeof sizeClasses;
   className?: string;
+  /** Affiche l'avatar grisé avec badge hors ligne */
+  disconnected?: boolean;
 }
 
-export function UserAvatar({ username, avatarUrl, size = 'md', className = '' }: UserAvatarProps) {
+export function UserAvatar({
+  username,
+  avatarUrl,
+  size = 'md',
+  className = '',
+  disconnected = false,
+}: UserAvatarProps) {
   const sizeClass = sizeClasses[size];
   const initials = getAvatarInitials(username);
   const colorClass = getAvatarColor(username);
+  const offlineClass = disconnected ? 'opacity-45 grayscale' : '';
 
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={`Photo de ${username}`}
-        className={`${sizeClass} rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-600 ${className}`}
-      />
-    );
-  }
-
-  return (
+  const avatar = avatarUrl ? (
+    <img
+      src={avatarUrl}
+      alt={`Photo de ${username}`}
+      className={`${sizeClass} rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-600 ${offlineClass} ${className}`}
+    />
+  ) : (
     <span
-      className={`${sizeClass} ${colorClass} rounded-full shrink-0 inline-flex items-center justify-center font-semibold text-white border border-white/20 ${className}`}
+      className={`${sizeClass} ${colorClass} rounded-full shrink-0 inline-flex items-center justify-center font-semibold text-white border border-white/20 ${offlineClass} ${className}`}
       aria-hidden
     >
       {initials}
+    </span>
+  );
+
+  if (!disconnected) return avatar;
+
+  return (
+    <span className="relative inline-flex shrink-0" title={`${username} — déconnecté`}>
+      {avatar}
+      <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-700 dark:bg-slate-600 border-2 border-white dark:border-slate-800 flex items-center justify-center">
+        <WifiOff className="w-2.5 h-2.5 text-white" aria-hidden />
+      </span>
     </span>
   );
 }

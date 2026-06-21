@@ -46,6 +46,7 @@ export interface PlayerPublic {
   id: string;
   name: string;
   eliminated: boolean;
+  connected: boolean;
   avatarUrl?: string | null;
 }
 

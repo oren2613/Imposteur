@@ -150,10 +150,18 @@ export function OnlineDiscussionScreen() {
               </p>
               <p className="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-3">
                 {currentPlayer && (
-                  <UserAvatar username={currentPlayer.name} avatarUrl={currentPlayer.avatarUrl} size="md" />
+                  <UserAvatar
+                    username={currentPlayer.name}
+                    avatarUrl={currentPlayer.avatarUrl}
+                    size="md"
+                    disconnected={!currentPlayer.connected}
+                  />
                 )}
                 <span className="inline-flex items-center gap-2">
                   {currentPlayer?.name ?? '…'}
+                  {currentPlayer && !currentPlayer.connected && (
+                    <span className="text-sm font-normal text-slate-500 dark:text-slate-400">(déconnecté)</span>
+                  )}
                   {currentPlayer?.name && isFriend(currentPlayer.name, friendsList) && (
                     <Heart className="w-6 h-6 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
                   )}
@@ -182,9 +190,17 @@ export function OnlineDiscussionScreen() {
                         ${status === 'speaking' ? 'bg-violet-100 dark:bg-violet-900/30 border-2 border-violet-400 dark:border-violet-500' : 'bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700'}
                       `}
                     >
-                      <UserAvatar username={p?.name ?? '?'} avatarUrl={p?.avatarUrl} size="sm" />
+                      <UserAvatar
+                        username={p?.name ?? '?'}
+                        avatarUrl={p?.avatarUrl}
+                        size="sm"
+                        disconnected={p ? !p.connected : false}
+                      />
                       <span className="font-medium text-slate-800 dark:text-slate-100 inline-flex items-center gap-1">
                         {p?.name ?? '…'}
+                        {p && !p.connected && (
+                          <span className="text-xs font-normal text-slate-500 dark:text-slate-400">(déco.)</span>
+                        )}
                         {p?.name && isFriend(p.name, friendsList) && (
                           <Heart className="w-3.5 h-3.5 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
                         )}

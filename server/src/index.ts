@@ -808,6 +808,7 @@ io.on('connection', (socket) => {
       } else {
         socket.emit('your_role', { word: result.privateView.word, playerId: result.privateView.playerId });
         socket.emit('game_state', { roomState: result.roomState });
+        io.to(roomId).emit('game_state', { roomState: result.roomState });
       }
     })();
   });
@@ -1035,6 +1036,7 @@ io.on('connection', (socket) => {
     const result = handleDisconnect(socket.id);
     if (!result) return;
     if (result.action === 'disconnected') {
+      broadcastGameState(result.roomId, result.roomState);
       return;
     }
 

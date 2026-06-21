@@ -65,6 +65,8 @@ export interface PlayerPublic {
   id: string;
   name: string;
   eliminated: boolean;
+  /** false si le joueur a perdu sa connexion (refresh, onglet fermé) */
+  connected: boolean;
   avatarUrl?: string | null;
 }
 
