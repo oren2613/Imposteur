@@ -29,11 +29,13 @@ export function OnlineVoteScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pendingVoteTarget, setPendingVoteTarget] = useState<string | null>(null);
   const [showMyWord, setShowMyWord] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
   const players = gameState?.players ?? [];
   const voteProgress = gameState?.voteProgress;
   const votable = players.filter((p) => !p.eliminated && p.id !== myPlayerId);
-  const eligiblePlayers = players.filter((p) => !p.eliminated && p.connected && p.id !== myPlayerId);
+  const myPlayer = players.find((p) => p.id === myPlayerId);
+  const iAmDisconnected = myPlayer != null && !myPlayer.connected;
 
   const hasVotedOnServer =
     myPlayerId != null && voteProgress?.votedPlayerIds.includes(myPlayerId) === true;
@@ -44,8 +46,24 @@ export function OnlineVoteScreen() {
     if (gameState?.phase !== 'vote') {
       setPendingVoteTarget(null);
       setSelectedId(null);
+      setSecondsLeft(null);
     }
   }, [gameState?.phase]);
+
+  useEffect(() => {
+    const startedAt = gameState?.voteStartedAt;
+    const durationMs = gameState?.voteDurationMs ?? 30_000;
+    if (gameState?.phase !== 'vote' || !startedAt) {
+      setSecondsLeft(null);
+      return;
+    }
+    const tick = () => {
+      setSecondsLeft(Math.max(0, Math.ceil((startedAt + durationMs - Date.now()) / 1000)));
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [gameState?.phase, gameState?.voteStartedAt, gameState?.voteDurationMs]);
 
   useEffect(() => {
     if (hasVotedOnServer) setPendingVoteTarget(null);
@@ -56,7 +74,7 @@ export function OnlineVoteScreen() {
   }, [error]);
 
   const votedCount = voteProgress?.votedCount ?? (hasVoted ? 1 : 0);
-  const eligibleCount = voteProgress?.eligibleCount ?? eligiblePlayers.length + (myPlayerId ? 1 : 0);
+  const eligibleCount = voteProgress?.eligibleCount ?? players.filter((p) => !p.eliminated).length;
   const progressPercent = eligibleCount > 0 ? Math.round((votedCount / eligibleCount) * 100) : 0;
 
   const handleConfirm = () => {
@@ -85,6 +103,11 @@ export function OnlineVoteScreen() {
           </p>
           <p className="text-slate-700 dark:text-slate-300 text-sm mb-3">
             Désignez qui vous pensez être l&apos;Imposteur, ou votez blanc si vous n&apos;êtes pas sûr.
+            {secondsLeft != null && (
+              <span className="block mt-2 font-medium text-violet-700 dark:text-violet-300 tabular-nums">
+                Temps restant : {secondsLeft}s — vote blanc automatique à l&apos;expiration
+              </span>
+            )}
           </p>
           <div className="flex items-center justify-between text-sm mb-2">
             <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
@@ -131,7 +154,7 @@ export function OnlineVoteScreen() {
               .map((p) => {
                 const isMe = p.id === myPlayerId;
                 const hasPlayerVoted = voteProgress?.votedPlayerIds.includes(p.id) ?? (isMe && pendingVoteTarget !== null);
-                const canVote = p.connected;
+                const autoBlank = hasPlayerVoted && !p.connected;
                 return (
                   <li
                     key={p.id}
@@ -150,12 +173,12 @@ export function OnlineVoteScreen() {
                     {hasPlayerVoted ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 shrink-0">
                         <Check className="w-3.5 h-3.5" />
-                        A voté
+                        {autoBlank ? 'Vote blanc (auto)' : 'A voté'}
                       </span>
-                    ) : canVote ? (
+                    ) : p.connected ? (
                       <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">En cours…</span>
                     ) : (
-                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">Déconnecté</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">Déconnecté…</span>
                     )}
                   </li>
                 );
@@ -163,7 +186,7 @@ export function OnlineVoteScreen() {
           </ul>
         </div>
 
-        {!hasVoted && (
+        {!hasVoted && !iAmDisconnected && (
           <>
             <p className="text-slate-600 dark:text-slate-400 text-center text-sm font-medium">
               Sélectionne ta cible puis confirme
@@ -216,7 +239,7 @@ export function OnlineVoteScreen() {
                   </span>
                   {!p.connected && (
                     <span className="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1 ml-10">
-                      Déconnecté — ne pourra pas voter tant qu&apos;il n&apos;est pas revenu
+                      Déconnecté — vote blanc automatique
                     </span>
                   )}
                 </button>
@@ -246,6 +269,12 @@ export function OnlineVoteScreen() {
               </button>
             </div>
           </>
+        )}
+
+        {iAmDisconnected && !hasVoted && (
+          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 text-center text-sm text-slate-600 dark:text-slate-400">
+            Tu es déconnecté : un vote blanc sera enregistré automatiquement pour toi.
+          </div>
         )}
 
         {hasVoted && (

@@ -46,8 +46,10 @@ interface Room {
   eliminatedPlayerId?: string | null;
   /** Gagnant quand phase === 'end' */
   winner?: Winner | null;
-  /** Votes du tour courant : socketId → targetPlayerId */
+  /** Votes du tour courant : playerId → targetPlayerId */
   votes?: Map<string, string>;
+  /** Début de la phase vote (epoch ms) pour timer 30 s */
+  voteStartedAt?: number;
   /** Discussion : ordre des playerIds, index du joueur courant, début du tour */
   discussionOrder?: string[];
   currentSpeakerIndex?: number;
@@ -259,6 +261,8 @@ function toLobbyState(room: Room): RoomLobbyState {
 const TURN_DURATION_MS = 20_000;
 /** Durée max de la discussion avant passage automatique au vote */
 const DISCUSSION_MAX_DURATION_MS = 120_000;
+/** Durée max pour voter avant vote blanc automatique */
+export const VOTE_MAX_DURATION_MS = 30_000;
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -305,15 +309,17 @@ function toGameState(room: Room): RoomGameState {
       : [];
   }
   if (phase === 'vote' && room.votes && room.gamePlayers) {
-    const eligible = room.gamePlayers.filter((p) => !p.eliminated && p.socketId !== '');
+    const eligible = room.gamePlayers.filter((p) => !p.eliminated);
     const votedPlayerIds = eligible
-      .filter((p) => room.votes!.has(p.socketId))
+      .filter((p) => room.votes!.has(p.id))
       .map((p) => p.id);
     state.voteProgress = {
       votedCount: votedPlayerIds.length,
       eligibleCount: eligible.length,
       votedPlayerIds,
     };
+    state.voteStartedAt = room.voteStartedAt;
+    state.voteDurationMs = VOTE_MAX_DURATION_MS;
   }
   return state;
 }
@@ -657,6 +663,15 @@ export function handleDisconnect(socketId: string): HandleDisconnectResult | nul
     player.socketId = '';
     const member = findMemberForGamePlayer(room, player);
     if (member) member.socketId = '';
+
+    if (room.phase === 'vote' && room.votes && !player.eliminated && !room.votes.has(player.id)) {
+      room.votes.set(player.id, VOTE_BLANK);
+      const finalized = tryFinalizeVote(room);
+      if (finalized) {
+        return { action: 'game_state', roomId, roomState: finalized.roomState };
+      }
+    }
+
     return { action: 'disconnected', roomId, roomState: toGameState(room) };
   }
 
@@ -689,7 +704,7 @@ export function reconnectToRoom(
   roomId: string,
   socketId: string,
   playerSessionId: string,
-  _playerName: string,
+  playerName: string,
   avatarUrl?: string | null
 ): ReconnectToRoomResult {
   const room = rooms.get(roomId);
@@ -697,9 +712,33 @@ export function reconnectToRoom(
     return { ok: false, code: 'room_not_found', message: 'Room introuvable' };
   }
 
+  if (room.status === 'playing' && room.gamePlayers) {
+    const memberBySession = room.members.find((m) => m.sessionId === playerSessionId);
+    if (memberBySession) {
+      return attachSocketToMember(room, roomId, memberBySession, socketId, avatarUrl, playerSessionId);
+    }
+
+    const memberByName = findReconnectableMemberByName(room, playerName);
+    if (memberByName) {
+      return attachSocketToMember(room, roomId, memberByName, socketId, avatarUrl, playerSessionId);
+    }
+
+    const player = room.gamePlayers.find(
+      (p) =>
+        !p.eliminated &&
+        p.name.trim().toLowerCase() === playerName.trim().toLowerCase()
+    );
+    if (player) {
+      const member = ensureMemberForGamePlayer(room, player);
+      return attachSocketToMember(room, roomId, member, socketId, avatarUrl, playerSessionId);
+    }
+
+    return { ok: false, code: 'session_not_found', message: 'Session introuvable. Rejoins la room avec ton pseudo.' };
+  }
+
   const member =
     room.members.find((m) => m.sessionId === playerSessionId) ??
-    findReconnectableMemberByName(room, _playerName);
+    findReconnectableMemberByName(room, playerName);
   if (member) {
     return attachSocketToMember(room, roomId, member, socketId, avatarUrl, playerSessionId);
   }
@@ -830,6 +869,103 @@ export function roleRevealAck(
   return { ok: true, allAcked: true, roomState: toGameState(room) };
 }
 
+/** Valeur de targetPlayerId pour un vote blanc (personne n'est éliminé) */
+export const VOTE_BLANK = 'BLANK';
+
+function getAlivePlayers(room: Room): GamePlayerInternal[] {
+  return (room.gamePlayers ?? []).filter((p) => !p.eliminated);
+}
+
+/** Démarre la phase vote : timer 30 s + vote blanc immédiat pour les déconnectés. */
+function beginVotePhase(room: Room): RoomGameState | null {
+  room.phase = 'vote';
+  room.votes = new Map();
+  room.voteStartedAt = Date.now();
+  applyBlankVotesForDisconnected(room);
+  return tryFinalizeVote(room)?.roomState ?? null;
+}
+
+function applyBlankVotesForDisconnected(room: Room): void {
+  if (!room.votes || !room.gamePlayers) return;
+  for (const p of getAlivePlayers(room)) {
+    if (p.socketId === '' && !room.votes.has(p.id)) {
+      room.votes.set(p.id, VOTE_BLANK);
+    }
+  }
+}
+
+function applyBlankVotesForRemaining(room: Room): void {
+  if (!room.votes || !room.gamePlayers) return;
+  for (const p of getAlivePlayers(room)) {
+    if (!room.votes.has(p.id)) {
+      room.votes.set(p.id, VOTE_BLANK);
+    }
+  }
+}
+
+function allPlayersVoted(room: Room): boolean {
+  if (!room.votes) return false;
+  const alive = getAlivePlayers(room);
+  return alive.length > 0 && alive.every((p) => room.votes!.has(p.id));
+}
+
+function resolveVotePhase(room: Room): RoomGameState {
+  const eliminatedId = computeEliminated(room.gamePlayers!, room.votes!);
+  room.votes = new Map();
+  room.voteStartedAt = undefined;
+
+  if (!eliminatedId) {
+    const aliveIds = room.gamePlayers!.filter((p) => !p.eliminated).map((p) => p.id);
+    room.phase = 'discussion';
+    room.discussionOrder = shuffle(aliveIds);
+    room.currentSpeakerIndex = 0;
+    room.turnStartedAt = Date.now();
+    room.discussionStartedAt = Date.now();
+    return toGameState(room);
+  }
+
+  const eliminated = room.gamePlayers!.find((p) => p.id === eliminatedId)!;
+  eliminated.eliminated = true;
+  room.eliminatedPlayerId = eliminatedId;
+
+  const victory = checkVictoryAfterElimination(room.gamePlayers!);
+  if (victory) {
+    return enterEndPhase(room, victory);
+  }
+  if (eliminated.role === 'imposteur') {
+    if (shouldContinueAfterImpostorEliminated(room.gamePlayers!, room.config.mrWhiteEnabled)) {
+      room.phase = 'eliminatedReveal';
+      return toGameState(room);
+    }
+    return enterEndPhase(room, 'citoyens');
+  }
+  if (eliminated.role === 'mrWhite') {
+    room.phase = 'mrWhiteGuess';
+    return toGameState(room);
+  }
+  room.phase = 'eliminatedReveal';
+  return toGameState(room);
+}
+
+function tryFinalizeVote(room: Room): { roomState: RoomGameState } | null {
+  if (room.phase !== 'vote' || !allPlayersVoted(room)) return null;
+  return { roomState: resolveVotePhase(room) };
+}
+
+function ensureMemberForGamePlayer(room: Room, player: GamePlayerInternal): RoomMember {
+  const existing = findMemberForGamePlayer(room, player);
+  if (existing) return existing;
+  const member: RoomMember = {
+    socketId: '',
+    name: player.name,
+    isHost: false,
+    sessionId: player.sessionId,
+    avatarUrl: player.avatarUrl ?? null,
+  };
+  room.members.push(member);
+  return member;
+}
+
 // --- go_to_vote, vote, continue_after_eliminated
 
 export type GoToVoteResult =
@@ -847,13 +983,9 @@ export function goToVote(roomId: string, socketId: string): GoToVoteResult {
   if (room.hostSocketId !== socketId) {
     return { ok: false, code: 'not_host', message: 'Seul le host peut lancer le vote' };
   }
-  room.phase = 'vote';
-  room.votes = new Map();
-  return { ok: true, roomState: toGameState(room) };
+  const finalized = beginVotePhase(room);
+  return { ok: true, roomState: finalized ?? toGameState(room) };
 }
-
-/** Valeur de targetPlayerId pour un vote blanc (personne n'est éliminé) */
-export const VOTE_BLANK = 'BLANK';
 
 function computeEliminated(
   gamePlayers: GamePlayerInternal[],
@@ -884,8 +1016,7 @@ export type VoteResult =
 export function vote(
   roomId: string,
   socketId: string,
-  targetPlayerId: string,
-  socketIdsInRoom: string[]
+  targetPlayerId: string
 ): VoteResult {
   const room = rooms.get(roomId);
   if (!room || room.status !== 'playing' || !room.gamePlayers || !room.votes) {
@@ -898,7 +1029,7 @@ export function vote(
   const voter = room.gamePlayers.find((p) => p.socketId === socketId);
   if (!voter) return { ok: false, code: 'not_in_game', message: 'Joueur non trouvé' };
   if (voter.eliminated) return { ok: false, code: 'eliminated', message: 'Vous êtes éliminé' };
-  if (room.votes.has(socketId)) return { ok: false, code: 'already_voted', message: 'Vous avez déjà voté' };
+  if (room.votes.has(voter.id)) return { ok: false, code: 'already_voted', message: 'Vous avez déjà voté' };
 
   if (targetPlayerId !== VOTE_BLANK) {
     const target = room.gamePlayers.find((p) => p.id === targetPlayerId);
@@ -907,53 +1038,13 @@ export function vote(
     if (target.id === voter.id) return { ok: false, code: 'invalid_target', message: 'Vous ne pouvez pas voter contre vous-même' };
   }
 
-  room.votes.set(socketId, targetPlayerId);
+  room.votes.set(voter.id, targetPlayerId);
 
-  const eligibleSocketIds = new Set(
-    room.gamePlayers
-      .filter((p) => !p.eliminated)
-      .map((p) => p.socketId)
-      .filter((id) => socketIdsInRoom.includes(id))
-  );
-  const allVoted = eligibleSocketIds.size > 0 && [...eligibleSocketIds].every((id) => room.votes!.has(id));
-  if (!allVoted) {
-    return { ok: true, complete: false, roomState: toGameState(room) };
+  const finalized = tryFinalizeVote(room);
+  if (finalized) {
+    return { ok: true, complete: true, roomState: finalized.roomState };
   }
-
-  const eliminatedId = computeEliminated(room.gamePlayers, room.votes);
-  room.votes = new Map();
-
-  if (!eliminatedId) {
-    const aliveIds = room.gamePlayers.filter((p) => !p.eliminated).map((p) => p.id);
-    room.phase = 'discussion';
-    room.discussionOrder = shuffle(aliveIds);
-    room.currentSpeakerIndex = 0;
-    room.turnStartedAt = Date.now();
-    room.discussionStartedAt = Date.now();
-    return { ok: true, complete: true, roomState: toGameState(room) };
-  }
-
-  const eliminated = room.gamePlayers.find((p) => p.id === eliminatedId)!;
-  eliminated.eliminated = true;
-  room.eliminatedPlayerId = eliminatedId;
-
-  const victory = checkVictoryAfterElimination(room.gamePlayers);
-  if (victory) {
-    return { ok: true, complete: true, roomState: enterEndPhase(room, victory) };
-  }
-  if (eliminated.role === 'imposteur') {
-    if (shouldContinueAfterImpostorEliminated(room.gamePlayers, room.config.mrWhiteEnabled)) {
-      room.phase = 'eliminatedReveal';
-      return { ok: true, complete: true, roomState: toGameState(room) };
-    }
-    return { ok: true, complete: true, roomState: enterEndPhase(room, 'citoyens') };
-  }
-  if (eliminated.role === 'mrWhite') {
-    room.phase = 'mrWhiteGuess';
-    return { ok: true, complete: true, roomState: toGameState(room) };
-  }
-  room.phase = 'eliminatedReveal';
-  return { ok: true, complete: true, roomState: toGameState(room) };
+  return { ok: true, complete: false, roomState: toGameState(room) };
 }
 
 // --- discussion_pass
@@ -980,9 +1071,8 @@ export function discussionPass(roomId: string, socketId: string): DiscussionPass
 
   room.currentSpeakerIndex = idx + 1;
   if (room.currentSpeakerIndex >= room.discussionOrder.length) {
-    room.phase = 'vote';
-    room.votes = new Map();
-    return { ok: true, roomState: toGameState(room) };
+    const finalized = beginVotePhase(room);
+    return { ok: true, roomState: finalized ?? toGameState(room) };
   }
   room.turnStartedAt = Date.now();
   return { ok: true, roomState: toGameState(room) };
@@ -1013,8 +1103,7 @@ export function advanceDiscussionIfSpeakerDisconnected(
 
   room.currentSpeakerIndex = idx + 1;
   if (room.currentSpeakerIndex >= room.discussionOrder.length) {
-    room.phase = 'vote';
-    room.votes = new Map();
+    beginVotePhase(room);
   } else {
     room.turnStartedAt = Date.now();
   }
@@ -1028,6 +1117,29 @@ export function getDiscussionRoomIds(): string[] {
     if (room.status === 'playing' && room.phase === 'discussion') ids.push(id);
   }
   return ids;
+}
+
+/** Liste des roomId en phase vote (pour le tick de timeout vote) */
+export function getVoteRoomIds(): string[] {
+  const ids: string[] = [];
+  for (const [id, room] of rooms) {
+    if (room.status === 'playing' && room.phase === 'vote') ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * À l'expiration du timer vote (30 s), vote blanc automatique pour les joueurs restants.
+ */
+export function forceVoteIfTimeout(roomId: string): RoomGameState | null {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== 'playing' || room.phase !== 'vote' || !room.voteStartedAt) {
+    return null;
+  }
+  if (Date.now() - room.voteStartedAt < VOTE_MAX_DURATION_MS) return null;
+  applyBlankVotesForRemaining(room);
+  const finalized = tryFinalizeVote(room);
+  return finalized?.roomState ?? toGameState(room);
 }
 
 export type RelayVoiceSignalResult =
@@ -1113,8 +1225,7 @@ export function forceDiscussionToVoteIfTimeout(roomId: string): RoomGameState | 
   if (!room || room.status !== 'playing' || room.phase !== 'discussion') return null;
   const started = room.discussionStartedAt ?? 0;
   if (Date.now() - started < DISCUSSION_MAX_DURATION_MS) return null;
-  room.phase = 'vote';
-  room.votes = new Map();
+  beginVotePhase(room);
   return toGameState(room);
 }
 
@@ -1179,6 +1290,7 @@ function clearGameState(room: Room): void {
   room.eliminatedPlayerId = undefined;
   room.winner = undefined;
   room.votes = undefined;
+  room.voteStartedAt = undefined;
   room.discussionOrder = undefined;
   room.currentSpeakerIndex = undefined;
   room.turnStartedAt = undefined;

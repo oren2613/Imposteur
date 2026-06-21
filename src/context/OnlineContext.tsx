@@ -398,10 +398,14 @@ export function OnlineProvider({ children }: { children: ReactNode }) {
       setMatchmakingTimeoutAt(null);
       if (reconnectingRef.current) {
         const session = getStoredSession();
-        if (
-          session?.roomId &&
-          (payload.code === 'session_not_found' || payload.code === 'session_active')
-        ) {
+        const retryableCodes = new Set([
+          'session_not_found',
+          'session_active',
+          'internal',
+          'wrong_phase',
+          'game_in_progress',
+        ]);
+        if (session?.roomId && retryableCodes.has(payload.code)) {
           const token = getToken();
           socket.emit('join_room', {
             roomId: session.roomId,

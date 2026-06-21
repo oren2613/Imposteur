@@ -78,6 +78,10 @@ export interface RoomGameState {
     eligibleCount: number;
     votedPlayerIds: string[];
   };
+  /** Début de la phase vote (epoch ms) */
+  voteStartedAt?: number;
+  /** Durée max du vote en ms (30 000) */
+  voteDurationMs?: number;
 }
 
 /** Payload your_role (mot + id du joueur) */

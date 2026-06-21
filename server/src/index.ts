@@ -33,6 +33,8 @@ import {
   advanceDiscussionIfSpeakerDisconnected,
   forceDiscussionToVoteIfTimeout,
   getDiscussionRoomIds,
+  getVoteRoomIds,
+  forceVoteIfTimeout,
   getRoomHostName,
   relayVoiceSignal,
 } from './roomStore.js';
@@ -937,13 +939,10 @@ io.on('connection', (socket) => {
       emitError(socket, 'invalid_payload', 'Payload vote invalide');
       return;
     }
-    const roomSockets = io.sockets.adapter.rooms.get(roomId);
-    const socketIdsInRoom = roomSockets ? [...roomSockets] : [];
     const result = vote(
       roomId,
       socket.id,
-      (payload as VotePayload).targetPlayerId,
-      socketIdsInRoom
+      (payload as VotePayload).targetPlayerId
     );
     if (!result.ok) {
       emitError(socket, result.code, result.message);
@@ -1081,6 +1080,13 @@ setInterval(() => {
     const newState = advanceDiscussionIfSpeakerDisconnected(roomId, socketIdsInRoom);
     if (newState) {
       io.to(roomId).emit('game_state', { roomState: newState });
+    }
+  }
+
+  for (const roomId of getVoteRoomIds()) {
+    const voteState = forceVoteIfTimeout(roomId);
+    if (voteState) {
+      io.to(roomId).emit('game_state', { roomState: voteState });
     }
   }
 }, DISCUSSION_TIMEOUT_CHECK_MS);
