@@ -79,3 +79,8 @@ export function shouldContinueAfterImpostorEliminated(
     players.some((p) => p.role === 'mrWhite' && !p.eliminated)
   );
 }
+
+/** La partie continue si Mr. White se trompe mais qu'un Imposteur est encore vivant. */
+export function shouldContinueAfterMrWhiteWrongGuess(players: PlayerWithRole[]): boolean {
+  return players.some((p) => p.role === 'imposteur' && !p.eliminated);
+}

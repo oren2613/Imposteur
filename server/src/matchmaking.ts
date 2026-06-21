@@ -2,7 +2,7 @@
  * File d'attente matchmaking : regroupe les joueurs en room automatiquement.
  *
  * Joueurs IA : tant qu'un humain attend et que la room n'est pas pleine, un bot
- * est ajouté à la file toutes les BOT_ADD_INTERVAL_MS (20 s par défaut). La file
+ * est ajouté à la file après un délai aléatoire de 5 à 20 s. La file
  * affichée grandit donc progressivement (1/4 → 2/4 → 3/4 → 4/4), puis la partie
  * démarre. Si de vrais joueurs arrivent entre-temps, ils prennent la place des bots.
  */
@@ -25,8 +25,18 @@ export const MATCH_PREFERRED = 4;
 export const MATCH_TARGET = MATCH_PREFERRED;
 /** Délai (sans bots) avant un match humain forcé à 3+ */
 export const MATCH_TIMEOUT_MS = 20_000;
-/** Intervalle d'ajout d'un joueur IA quand un humain attend (toutes les 20 s) */
-export const BOT_ADD_INTERVAL_MS = Number(process.env.BOT_ADD_INTERVAL_MS) || 20_000;
+/** Délai min/max (ms) entre deux ajouts de joueur IA en file d'attente */
+export const BOT_ADD_INTERVAL_MIN_MS = Number(process.env.BOT_ADD_INTERVAL_MIN_MS) || 5_000;
+export const BOT_ADD_INTERVAL_MAX_MS = Number(process.env.BOT_ADD_INTERVAL_MAX_MS) || 20_000;
+/** @deprecated Utiliser BOT_ADD_INTERVAL_MIN_MS / MAX_MS ; fixe l'intervalle si défini */
+export const BOT_ADD_INTERVAL_MS = Number(process.env.BOT_ADD_INTERVAL_MS) || 0;
+
+function nextBotAddDelayMs(): number {
+  if (BOT_ADD_INTERVAL_MS > 0) return BOT_ADD_INTERVAL_MS;
+  const min = BOT_ADD_INTERVAL_MIN_MS;
+  const max = Math.max(min, BOT_ADD_INTERVAL_MAX_MS);
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
 /** Activation des joueurs IA (compléter le matchmaking). Désactivable via BOTS_ENABLED=0. */
 export const BOTS_ENABLED = process.env.BOTS_ENABLED !== '0';
 /**
@@ -77,7 +87,7 @@ function humanQueueCount(): number {
 
 /**
  * Planifie le prochain « tick » de matchmaking.
- * - Bots activés : toutes les BOT_ADD_INTERVAL_MS dès qu'un humain attend (ajout d'un bot).
+ * - Bots activés : délai aléatoire 5–20 s dès qu'un humain attend (ajout d'un bot).
  * - Bots désactivés : un seul match humain forcé après MATCH_TIMEOUT_MS à partir de MATCH_MIN.
  */
 export function scheduleMatchmakingTimeout(): number | null {
@@ -86,7 +96,7 @@ export function scheduleMatchmakingTimeout(): number | null {
   if (humanQueueCount() < 1) return null;
   if (!BOTS_ENABLED && humanQueueCount() < MATCH_MIN) return null;
 
-  const delay = BOTS_ENABLED ? BOT_ADD_INTERVAL_MS : MATCH_TIMEOUT_MS;
+  const delay = BOTS_ENABLED ? nextBotAddDelayMs() : MATCH_TIMEOUT_MS;
   matchTimeoutAt = Date.now() + delay;
   matchTimer = setTimeout(() => {
     matchTimer = null;

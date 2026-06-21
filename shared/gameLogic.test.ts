@@ -5,6 +5,7 @@ import {
   getMaxImpostors,
   isMrWhiteGuessCorrect,
   shouldContinueAfterImpostorEliminated,
+  shouldContinueAfterMrWhiteWrongGuess,
 } from './gameLogic';
 import type { Role } from './types';
 
@@ -83,6 +84,28 @@ describe('shouldContinueAfterImpostorEliminated', () => {
         [{ role: 'citoyen', eliminated: false }],
         false
       )
+    ).toBe(false);
+  });
+});
+
+describe('shouldContinueAfterMrWhiteWrongGuess', () => {
+  it('continue si un imposteur est encore vivant', () => {
+    expect(
+      shouldContinueAfterMrWhiteWrongGuess([
+        { role: 'mrWhite', eliminated: true },
+        { role: 'imposteur', eliminated: false },
+        { role: 'citoyen', eliminated: false },
+      ])
+    ).toBe(true);
+  });
+
+  it('termine si aucun imposteur vivant', () => {
+    expect(
+      shouldContinueAfterMrWhiteWrongGuess([
+        { role: 'mrWhite', eliminated: true },
+        { role: 'imposteur', eliminated: true },
+        { role: 'citoyen', eliminated: false },
+      ])
     ).toBe(false);
   });
 });

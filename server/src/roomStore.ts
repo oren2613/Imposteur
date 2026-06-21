@@ -22,6 +22,7 @@ import { startGameLogic, checkVictoryAfterElimination } from './gameLogic.js';
 import {
   getMaxImpostors,
   shouldContinueAfterImpostorEliminated,
+  shouldContinueAfterMrWhiteWrongGuess,
 } from '../shared/gameLogic.js';
 
 /** Stats par sessionId (persistantes sur la room) */
@@ -1085,6 +1086,11 @@ function resolveVotePhase(room: Room): RoomGameState {
   eliminated.eliminated = true;
   room.eliminatedPlayerId = eliminatedId;
 
+  if (eliminated.role === 'mrWhite') {
+    room.phase = 'mrWhiteGuess';
+    return toGameState(room);
+  }
+
   const victory = checkVictoryAfterElimination(room.gamePlayers!);
   if (victory) {
     return enterEndPhase(room, victory);
@@ -1095,10 +1101,6 @@ function resolveVotePhase(room: Room): RoomGameState {
       return toGameState(room);
     }
     return enterEndPhase(room, 'citoyens');
-  }
-  if (eliminated.role === 'mrWhite') {
-    room.phase = 'mrWhiteGuess';
-    return toGameState(room);
   }
   room.phase = 'eliminatedReveal';
   return toGameState(room);
@@ -1480,7 +1482,14 @@ export function mrWhiteGuess(roomId: string, socketId: string, guess: string): M
   const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
   const normalizedCitizen = room.wordPair.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
   const correct = normalizedGuess === normalizedCitizen;
-  return { ok: true, roomState: enterEndPhase(room, correct ? 'mrWhite' : 'citoyens') };
+  if (correct) {
+    return { ok: true, roomState: enterEndPhase(room, 'mrWhite') };
+  }
+  if (shouldContinueAfterMrWhiteWrongGuess(room.gamePlayers)) {
+    room.phase = 'eliminatedReveal';
+    return { ok: true, roomState: toGameState(room) };
+  }
+  return { ok: true, roomState: enterEndPhase(room, 'citoyens') };
 }
 
 // --- Joueurs IA (bots) : ajout au lobby + accesseurs pour le moteur de bots
@@ -1671,7 +1680,14 @@ export function applyBotMrWhiteGuess(roomId: string, playerId: string, guess: st
   if (!mrWhite || !mrWhite.isBot || mrWhite.role !== 'mrWhite') return null;
   const normalizedGuess = guess.trim().toLowerCase().replace(/\s+/g, ' ');
   const normalizedCitizen = room.wordPair.motCitoyens.trim().toLowerCase().replace(/\s+/g, ' ');
-  return enterEndPhase(room, normalizedGuess === normalizedCitizen ? 'mrWhite' : 'citoyens');
+  if (normalizedGuess === normalizedCitizen) {
+    return enterEndPhase(room, 'mrWhite');
+  }
+  if (shouldContinueAfterMrWhiteWrongGuess(room.gamePlayers)) {
+    room.phase = 'eliminatedReveal';
+    return toGameState(room);
+  }
+  return enterEndPhase(room, 'citoyens');
 }
 
 /** Un bot relance la discussion après l'élimination (uniquement si aucun humain vivant ne peut le faire). */

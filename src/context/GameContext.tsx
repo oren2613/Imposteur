@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { GameState, GamePhase, HistoryEntry } from '../types/game';
-import { startGame, isMrWhiteGuessCorrect, checkVictoryAfterElimination, shouldContinueAfterImpostorEliminated } from '../utils/gameLogic';
+import { startGame, isMrWhiteGuessCorrect, checkVictoryAfterElimination, shouldContinueAfterImpostorEliminated, shouldContinueAfterMrWhiteWrongGuess } from '../utils/gameLogic';
 
 const HISTORY_KEY = 'imposteur-history';
 const MAX_HISTORY = 50;
@@ -124,7 +124,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
         wordPair: s.wordPair!,
       };
 
-      // Vérification centralisée des conditions de victoire (2 joueurs restants)
+      if (eliminated.role === 'mrWhite') {
+        return {
+          ...s,
+          players,
+          eliminatedPlayerId: playerId,
+          phase: 'mrWhiteGuess',
+        };
+      }
+
       const victory = checkVictoryAfterElimination(players);
       if (victory === 'mrWhite') {
         appendHistoryEntry({ ...historyBase, winner: 'mrWhite' });
@@ -166,15 +174,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      if (eliminated.role === 'mrWhite') {
-        return {
-          ...s,
-          players,
-          eliminatedPlayerId: playerId,
-          phase: 'mrWhiteGuess',
-        };
-      }
-
       // Citoyen éliminé : révélation puis la partie continue
       return {
         ...s,
@@ -194,17 +193,36 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setState((s) => {
       if (!s.wordPair) return s;
       correct = isMrWhiteGuessCorrect(guess, s.wordPair.motCitoyens);
-      const winner: 'citoyens' | 'mrWhite' = correct ? 'mrWhite' : 'citoyens';
+      if (correct) {
+        appendHistoryEntry({
+          winner: 'mrWhite',
+          playerCount: s.players.length,
+          wordPair: s.wordPair,
+        });
+        return {
+          ...s,
+          mrWhiteGuessCorrect: true,
+          phase: 'end',
+          winner: 'mrWhite',
+        };
+      }
+      if (shouldContinueAfterMrWhiteWrongGuess(s.players)) {
+        return {
+          ...s,
+          mrWhiteGuessCorrect: false,
+          phase: 'eliminatedReveal',
+        };
+      }
       appendHistoryEntry({
-        winner,
+        winner: 'citoyens',
         playerCount: s.players.length,
         wordPair: s.wordPair,
       });
       return {
         ...s,
-        mrWhiteGuessCorrect: correct,
+        mrWhiteGuessCorrect: false,
         phase: 'end',
-        winner,
+        winner: 'citoyens',
       };
     });
     return correct;

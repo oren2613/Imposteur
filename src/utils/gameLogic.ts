@@ -8,6 +8,7 @@ export {
   isMrWhiteGuessCorrect,
   getMaxImpostors,
   shouldContinueAfterImpostorEliminated,
+  shouldContinueAfterMrWhiteWrongGuess,
 } from '@shared/gameLogic';
 export type { VictoryResult } from '@shared/gameLogic';
 

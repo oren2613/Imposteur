@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Heart, Check, Clock, Loader2 } from 'lucide-react';
+import { Heart, Check, Clock, Loader2, ChevronDown } from 'lucide-react';
 import { useOnline } from '../context/OnlineContext';
 import { Button } from '../components/Button';
 import { Layout } from '../components/Layout';
@@ -78,6 +78,7 @@ export function OnlineVoteScreen() {
   const votedCount = voteProgress?.votedCount ?? (hasVoted ? 1 : 0);
   const eligibleCount = voteProgress?.eligibleCount ?? players.filter((p) => !p.eliminated).length;
   const progressPercent = eligibleCount > 0 ? Math.round((votedCount / eligibleCount) * 100) : 0;
+  const canVote = !amEliminated && !hasVoted;
 
   const handleConfirm = () => {
     if (selectedId === null || hasVoted) return;
@@ -87,9 +88,10 @@ export function OnlineVoteScreen() {
   };
 
   return (
-    <Layout title="Vote d'élimination" hideBack onBack={() => {}} backLabel="">
+    <Layout title="Vote" hideBack onBack={() => {}} backLabel="">
       <OnlineStatsBar />
-      <div className="flex flex-col gap-6">
+
+      <div className="flex flex-col gap-4 pb-28">
         {error && (
           <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400 text-sm bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">
             <span className="min-w-0 flex-1 text-center">{error}</span>
@@ -99,98 +101,130 @@ export function OnlineVoteScreen() {
           </div>
         )}
 
-        {amEliminated && (
-          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 text-center">
-            <p className="font-medium text-slate-800 dark:text-slate-100">
-              Tu as été éliminé
-            </p>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-              Observe le vote en cours. Tu ne peux plus voter.
-            </p>
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-violet-800 dark:text-violet-200">
+            <Clock className="w-4 h-4 shrink-0" />
+            {secondsLeft != null ? `${secondsLeft}s restantes` : 'Vote en cours'}
           </div>
-        )}
-
-        <div className="bg-violet-50 dark:bg-violet-900/20 rounded-2xl p-5 border border-violet-200 dark:border-violet-800">
-          <p className="text-sm font-medium text-violet-800 dark:text-violet-200 mb-1">
-            Phase de vote
-          </p>
-          <p className="text-slate-700 dark:text-slate-300 text-sm mb-3">
-            Désignez qui vous pensez être l&apos;Imposteur, ou votez blanc si vous n&apos;êtes pas sûr.
-            {secondsLeft != null && (
-              <span className="block mt-2 font-medium text-violet-700 dark:text-violet-300 tabular-nums">
-                Temps restant : {secondsLeft}s — vote blanc automatique à l&apos;expiration
-              </span>
-            )}
-          </p>
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-              <Clock className="w-4 h-4" />
-              Votes reçus
-            </span>
-            <span className="font-semibold text-slate-800 dark:text-slate-100 tabular-nums">
-              {votedCount} / {eligibleCount}
-            </span>
-          </div>
-          <div className="h-2.5 bg-violet-200/80 dark:bg-violet-950/50 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-violet-600 dark:bg-violet-400 transition-all duration-500 ease-out"
-              style={{ width: `${progressPercent}%` }}
-            />
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 tabular-nums">
+            {votedCount}/{eligibleCount} votes
           </div>
         </div>
 
+        <div className="h-2 bg-violet-200/80 dark:bg-violet-950/50 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-violet-600 dark:bg-violet-400 transition-all duration-500 ease-out"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+
+        {amEliminated && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/60 p-4 text-center text-sm">
+            <p className="font-medium text-slate-800 dark:text-slate-100">Tu as été éliminé</p>
+            <p className="text-slate-600 dark:text-slate-400 mt-1">Observe le vote — tu ne peux plus voter.</p>
+          </div>
+        )}
+
         {hasVoted && (
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl p-5 border border-emerald-200 dark:border-emerald-800 text-center">
-            <Check className="w-8 h-8 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-            <p className="font-semibold text-emerald-800 dark:text-emerald-200">
-              Ton vote est enregistré
-            </p>
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 text-center">
+            <Check className="w-7 h-7 text-emerald-600 dark:text-emerald-400 mx-auto mb-1.5" />
+            <p className="font-semibold text-emerald-800 dark:text-emerald-200">Vote enregistré</p>
             {myVoteTarget && (
               <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">
-                Tu as choisi de {voteTargetLabel(myVoteTarget, players)}.
+                {voteTargetLabel(myVoteTarget, players)}
               </p>
             )}
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-3 inline-flex items-center justify-center gap-2">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 inline-flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              En attente des autres joueurs…
+              En attente des autres…
             </p>
           </div>
         )}
 
-        {clues.length > 0 && (
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
-            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
-              Indices donnés
-            </p>
-            <ul className="space-y-2">
-              {clues.map((c, i) => (
-                <li key={`${c.playerId}-${i}`} className="flex items-center gap-2 text-sm">
-                  <span className="font-medium text-slate-800 dark:text-slate-100">{c.name}</span>
-                  <span className="text-slate-400 dark:text-slate-500">·</span>
-                  <span className="text-violet-700 dark:text-violet-300 font-medium break-words">
-                    {c.text}
+        {canVote && (
+          <section aria-label="Choix de vote">
+            <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 text-center mb-3">
+              Qui éliminer ?
+            </h2>
+            <div className="grid grid-cols-2 gap-2">
+              {votable.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedId(p.id)}
+                  aria-pressed={selectedId === p.id}
+                  className={`
+                    flex flex-col items-center gap-2 rounded-xl border-2 px-3 py-3 text-center transition-all
+                    ${
+                      selectedId === p.id
+                        ? 'border-rose-500 bg-rose-50 dark:bg-rose-900/20 ring-2 ring-rose-300 dark:ring-rose-700'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'
+                    }
+                  `}
+                >
+                  <UserAvatar
+                    username={p.name}
+                    avatarUrl={p.avatarUrl}
+                    size="md"
+                    disconnected={!p.connected}
+                  />
+                  <span className="text-sm font-medium text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight">
+                    {p.name}
+                    {isFriend(p.name, friendsList) && (
+                      <Heart className="w-3.5 h-3.5 inline ml-0.5 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
+                    )}
                   </span>
-                </li>
+                  {!p.connected && (
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">Déconnecté</span>
+                  )}
+                </button>
               ))}
-            </ul>
-          </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSelectedId(VOTE_BLANK)}
+              aria-pressed={selectedId === VOTE_BLANK}
+              className={`
+                mt-2 w-full rounded-xl border-2 px-4 py-3 text-left transition-all
+                ${
+                  selectedId === VOTE_BLANK
+                    ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20 ring-2 ring-violet-300 dark:ring-violet-700'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'
+                }
+              `}
+            >
+              <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Vote blanc</span>
+              <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Personne n&apos;est éliminé ce tour
+              </span>
+            </button>
+          </section>
         )}
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
-            Qui a voté ?
+        {iAmDisconnected && !hasVoted && (
+          <p className="text-center text-sm text-slate-600 dark:text-slate-400">
+            Tu es déconnecté : un vote blanc sera enregistré automatiquement.
           </p>
-          <ul className="space-y-2">
+        )}
+
+        <details className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 [&::-webkit-details-marker]:hidden">
+            <span>Qui a voté ? ({votedCount}/{eligibleCount})</span>
+            <ChevronDown className="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" />
+          </summary>
+          <ul className="border-t border-slate-200 dark:border-slate-700 px-2 pb-2">
             {players
               .filter((p) => !p.eliminated)
               .map((p) => {
                 const isMe = p.id === myPlayerId;
-                const hasPlayerVoted = voteProgress?.votedPlayerIds.includes(p.id) ?? (isMe && pendingVoteTarget !== null);
+                const hasPlayerVoted =
+                  voteProgress?.votedPlayerIds.includes(p.id) ?? (isMe && pendingVoteTarget !== null);
                 const autoBlank = hasPlayerVoted && !p.connected;
                 return (
                   <li
                     key={p.id}
-                    className="flex items-center gap-3 py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700"
+                    className="flex items-center gap-2 py-2 px-2 rounded-lg"
                   >
                     <UserAvatar
                       username={p.name}
@@ -198,118 +232,45 @@ export function OnlineVoteScreen() {
                       size="sm"
                       disconnected={!p.connected}
                     />
-                    <span className="flex-1 min-w-0 truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                    <span className="flex-1 min-w-0 truncate text-sm text-slate-800 dark:text-slate-100">
                       {p.name}
                       {isMe && ' (toi)'}
                     </span>
                     {hasPlayerVoted ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 shrink-0">
                         <Check className="w-3.5 h-3.5" />
-                        {autoBlank ? 'Vote blanc (auto)' : 'A voté'}
+                        {autoBlank ? 'Blanc (auto)' : 'A voté'}
                       </span>
                     ) : p.connected ? (
-                      <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">En cours…</span>
+                      <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">…</span>
                     ) : (
-                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0">Déconnecté…</span>
+                      <span className="text-xs text-slate-500 shrink-0">Off</span>
                     )}
                   </li>
                 );
               })}
           </ul>
-        </div>
+        </details>
 
-        {!amEliminated && !hasVoted && (
-          <>
-            <p className="text-slate-600 dark:text-slate-400 text-center text-sm font-medium">
-              Sélectionne ta cible puis confirme
-            </p>
-
-            <div className="grid gap-3">
-              <button
-                type="button"
-                onClick={() => setSelectedId(VOTE_BLANK)}
-                className={`
-                  w-full py-4 px-5 rounded-2xl text-left font-medium border-2 transition-all
-                  ${selectedId === VOTE_BLANK
-                    ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20 dark:border-violet-500 ring-2 ring-violet-300 dark:ring-violet-700'
-                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'}
-                `}
-              >
-                <span className="block text-base">Vote blanc</span>
-                <span className="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-0.5">
-                  Personne n&apos;est éliminé ce tour
-                </span>
-              </button>
-              {votable.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setSelectedId(p.id)}
-                  className={`
-                    w-full py-4 px-5 rounded-2xl text-left font-medium
-                    border-2 transition-all
-                    ${
-                      selectedId === p.id
-                        ? 'border-rose-500 bg-rose-50 dark:bg-rose-900/20 dark:border-rose-500 ring-2 ring-rose-300 dark:ring-rose-700'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'
-                    }
-                  `}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <UserAvatar
-                      username={p.name}
-                      avatarUrl={p.avatarUrl}
-                      size="sm"
-                      disconnected={!p.connected}
-                    />
-                    <span>
-                      Éliminer {p.name}
-                      {isFriend(p.name, friendsList) && (
-                        <Heart className="w-4 h-4 inline ml-1 text-violet-500 fill-violet-500 shrink-0" aria-label="ami" />
-                      )}
-                    </span>
-                  </span>
-                  {!p.connected && (
-                    <span className="block text-xs font-normal text-slate-500 dark:text-slate-400 mt-1 ml-10">
-                      Déconnecté — vote blanc automatique
-                    </span>
-                  )}
-                </button>
+        {clues.length > 0 && (
+          <details className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 [&::-webkit-details-marker]:hidden">
+              <span>Indices ({clues.length})</span>
+              <ChevronDown className="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" />
+            </summary>
+            <ul className="border-t border-slate-200 dark:border-slate-700 px-4 pb-3 pt-1 space-y-2">
+              {clues.map((c, i) => (
+                <li key={`${c.playerId}-${i}`} className="text-sm">
+                  <span className="font-medium text-slate-800 dark:text-slate-100">{c.name}</span>
+                  <span className="text-slate-400 dark:text-slate-500"> · </span>
+                  <span className="text-violet-700 dark:text-violet-300 font-medium break-words">{c.text}</span>
+                </li>
               ))}
-            </div>
-
-            <div className="flex gap-3 items-center">
-              <Button
-                fullWidth
-                size="lg"
-                variant={selectedId === VOTE_BLANK ? 'secondary' : 'danger'}
-                onClick={handleConfirm}
-                disabled={selectedId === null}
-              >
-                {selectedId === null
-                  ? 'Choisis une option'
-                  : selectedId === VOTE_BLANK
-                    ? 'Confirmer — vote blanc'
-                    : `Confirmer — éliminer ${players.find((p) => p.id === selectedId)?.name ?? '…'}`}
-              </Button>
-              <button
-                type="button"
-                onClick={() => setShowMyWord(true)}
-                className="shrink-0 py-2 px-3 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors"
-              >
-                Voir mon mot
-              </button>
-            </div>
-          </>
+            </ul>
+          </details>
         )}
 
-        {iAmDisconnected && !hasVoted && (
-          <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 text-center text-sm text-slate-600 dark:text-slate-400">
-            Tu es déconnecté : un vote blanc sera enregistré automatiquement pour toi.
-          </div>
-        )}
-
-        {hasVoted && (
+        {(hasVoted || !canVote) && (
           <button
             type="button"
             onClick={() => setShowMyWord(true)}
@@ -319,6 +280,33 @@ export function OnlineVoteScreen() {
           </button>
         )}
       </div>
+
+      {canVote && (
+        <div className="fixed bottom-0 left-0 right-0 z-10 border-t border-slate-200 dark:border-slate-700 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-sm px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-lg mx-auto flex gap-2">
+            <Button
+              fullWidth
+              size="lg"
+              variant={selectedId === VOTE_BLANK ? 'secondary' : 'danger'}
+              onClick={handleConfirm}
+              disabled={selectedId === null}
+            >
+              {selectedId === null
+                ? 'Sélectionne un joueur'
+                : selectedId === VOTE_BLANK
+                  ? 'Confirmer — vote blanc'
+                  : `Éliminer ${players.find((p) => p.id === selectedId)?.name ?? '…'}`}
+            </Button>
+            <button
+              type="button"
+              onClick={() => setShowMyWord(true)}
+              className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-600 px-3 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              Mot
+            </button>
+          </div>
+        </div>
+      )}
 
       <ViewMyWordModal
         isOpen={showMyWord}
